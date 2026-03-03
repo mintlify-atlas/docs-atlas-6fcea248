@@ -1,0 +1,157 @@
+{
+  "projectType": "sdk-library",
+  "projectName": "Soroban Rust SDK",
+  "projectDescription": "Rust SDK for writing smart contracts on the Soroban platform deployed on Stellar.",
+  "theme": "aspen",
+  "primaryColor": "#7B16FF",
+  "lightColor": "#9D4EFF",
+  "darkColor": "#5A00CC",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Getting Started",
+            "pages": [
+              "introduction",
+              "installation",
+              "quickstart"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "core/contracts",
+              "core/environment",
+              "core/types",
+              "core/storage",
+              "core/authentication"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/writing-contracts",
+              "guides/testing",
+              "guides/deploying",
+              "guides/events",
+              "guides/custom-types",
+              "guides/error-handling"
+            ]
+          },
+          {
+            "group": "Advanced Topics",
+            "pages": [
+              "advanced/cryptography",
+              "advanced/cross-contract-calls",
+              "advanced/token-interface",
+              "advanced/optimization"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Macros",
+            "pages": [
+              "api/macros/contract",
+              "api/macros/contractimpl",
+              "api/macros/contracttype",
+              "api/macros/contracterror",
+              "api/macros/contractevent",
+              "api/macros/contractimport",
+              "api/macros/symbol-short"
+            ]
+          },
+          {
+            "group": "Core Types",
+            "pages": [
+              "api/types/env",
+              "api/types/address",
+              "api/types/symbol",
+              "api/types/bytes",
+              "api/types/string"
+            ]
+          },
+          {
+            "group": "Collections",
+            "pages": [
+              "api/collections/vec",
+              "api/collections/map"
+            ]
+          },
+          {
+            "group": "Storage",
+            "pages": [
+              "api/storage/overview",
+              "api/storage/persistent",
+              "api/storage/temporary",
+              "api/storage/instance"
+            ]
+          },
+          {
+            "group": "Modules",
+            "pages": [
+              "api/modules/auth",
+              "api/modules/crypto",
+              "api/modules/deploy",
+              "api/modules/events",
+              "api/modules/ledger",
+              "api/modules/token",
+              "api/modules/testutils"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Migration",
+        "groups": [
+          {
+            "group": "Version Upgrades",
+            "pages": [
+              "migration/overview",
+              "migration/breaking-changes"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Contract definition macros (#[contract], #[contractimpl])",
+    "Type conversion with contracttype and custom types",
+    "Three-tier storage system (Persistent, Temporary, Instance)",
+    "Built-in authentication and authorization",
+    "Cryptography support (BLS12-381, BN254)",
+    "Event publishing for contract activity",
+    "Token standard implementation",
+    "Comprehensive testing utilities"
+  ],
+  "publicApiSurface": [
+    "#[contract] - Mark struct as contract",
+    "#[contractimpl] - Export contract functions",
+    "#[contracttype] - Define custom contract types",
+    "#[contracterror] - Define error enums",
+    "#[contractevent] - Define events",
+    "#[contractimport] - Import external contracts",
+    "symbol_short! - Create short symbols",
+    "Env - Contract execution environment",
+    "Address - Contract and account addresses",
+    "Storage - Persistent/Temporary/Instance storage",
+    "Vec<T> - Contract vector collection",
+    "Map<K, V> - Contract key-value map",
+    "Bytes/BytesN<N> - Binary data types",
+    "Symbol - Short string identifiers",
+    "String - UTF-8 strings",
+    "auth - Authorization module",
+    "crypto - Cryptographic operations",
+    "deploy - Contract deployment",
+    "events - Event publishing",
+    "ledger - Ledger information",
+    "token - Token interface",
+    "testutils - Testing utilities"
+  ]
+}
