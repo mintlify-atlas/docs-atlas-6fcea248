@@ -1,0 +1,472 @@
+---
+title: "token"
+description: "Token contract interface and Stellar Asset Contract integration"
+---
+
+The `token` module contains types for interacting with token contracts, including the Stellar Asset Contract. It provides a standardized interface defined by SEP-41.
+
+## Overview
+
+The token interface provides a standard way to interact with fungible tokens on Soroban, including transfers, allowances, balances, and metadata.
+
+## Interfaces
+
+### TokenInterface
+
+Standard interface for token contracts defined by [SEP-41](https://github.com/stellar/stellar-protocol/blob/master/ecosystem/sep-0041.md).
+
+```rust
+pub trait TokenInterface {
+    // ... methods ...
+}
+```
+
+Used to interact with any token implementing the standard interface, including the Stellar Asset Contract.
+
+### TokenClient
+
+Client for calling token contract functions.
+
+```rust
+use soroban_sdk::token::TokenClient;
+
+let token = TokenClient::new(&env, &token_address);
+```
+
+## Balance Functions
+
+### balance
+
+Returns the balance of an address.
+
+```rust
+fn balance(env: Env, id: Address) -> i128
+```
+
+**Parameters:**
+- `id` - The address to query. Returns 0 if the address has no balance.
+
+**Example:**
+```rust
+use soroban_sdk::{Env, Address};
+use soroban_sdk::token::TokenClient;
+
+fn get_balance(env: &Env, token: &Address, account: &Address) -> i128 {
+    let token = TokenClient::new(env, token);
+    token.balance(account)
+}
+```
+
+## Transfer Functions
+
+### transfer
+
+Transfers tokens from one address to another.
+
+```rust
+fn transfer(env: Env, from: Address, to: MuxedAddress, amount: i128)
+```
+
+**Parameters:**
+- `from` - The address holding the tokens (requires authorization)
+- `to` - The recipient address (can be muxed)
+- `amount` - The amount of tokens to transfer
+
+**Events:** Emits a `transfer` event with topics `[from, to]` and data `{to_muxed_id, amount}`.
+
+**Example:**
+```rust
+use soroban_sdk::{contract, contractimpl, Env, Address};
+use soroban_sdk::token::TokenClient;
+
+#[contract]
+pub struct PaymentContract;
+
+#[contractimpl]
+impl PaymentContract {
+    pub fn pay(
+        env: Env,
+        token: Address,
+        from: Address,
+        to: Address,
+        amount: i128
+    ) {
+        from.require_auth();
+        
+        let token = TokenClient::new(&env, &token);
+        token.transfer(&from, &to.into(), &amount);
+    }
+}
+```
+
+### transfer_from
+
+Transfers tokens using an allowance.
+
+```rust
+fn transfer_from(
+    env: Env,
+    spender: Address,
+    from: Address,
+    to: Address,
+    amount: i128
+)
+```
+
+**Parameters:**
+- `spender` - The address authorizing the transfer (requires authorization)
+- `from` - The address holding the tokens
+- `to` - The recipient address
+- `amount` - The amount to transfer
+
+**Note:** Requires that `spender` has sufficient allowance from `from`.
+
+**Events:** Emits a `transfer` event.
+
+**Example:**
+```rust
+use soroban_sdk::{contract, contractimpl, Env, Address};
+use soroban_sdk::token::TokenClient;
+
+#[contract]
+pub struct Escrow;
+
+#[contractimpl]
+impl Escrow {
+    pub fn release(
+        env: Env,
+        token: Address,
+        from: Address,
+        to: Address,
+        amount: i128
+    ) {
+        let contract = env.current_contract_address();
+        contract.require_auth();
+        
+        let token = TokenClient::new(&env, &token);
+        // Use the escrow contract's allowance
+        token.transfer_from(&contract, &from, &to, &amount);
+    }
+}
+```
+
+## Allowance Functions
+
+### allowance
+
+Returns the allowance for a spender.
+
+```rust
+fn allowance(env: Env, from: Address, spender: Address) -> i128
+```
+
+**Parameters:**
+- `from` - The address holding the tokens
+- `spender` - The address authorized to spend
+
+**Returns:** The amount the spender can transfer from `from`'s balance.
+
+### approve
+
+Sets an allowance for a spender.
+
+```rust
+fn approve(
+    env: Env,
+    from: Address,
+    spender: Address,
+    amount: i128,
+    expiration_ledger: u32
+)
+```
+
+**Parameters:**
+- `from` - The address holding the tokens (requires authorization)
+- `spender` - The address being authorized
+- `amount` - The amount to approve
+- `expiration_ledger` - Ledger number when the allowance expires
+
+**Events:** Emits an `approve` event with topics `[from, spender]` and data `[amount, expiration_ledger]`.
+
+**Example:**
+```rust
+use soroban_sdk::{Env, Address};
+use soroban_sdk::token::TokenClient;
+
+fn approve_spender(
+    env: &Env,
+    token: &Address,
+    from: &Address,
+    spender: &Address,
+    amount: i128
+) {
+    from.require_auth();
+    
+    let token = TokenClient::new(env, token);
+    let expiration = env.ledger().sequence() + 1000;
+    token.approve(from, spender, &amount, &expiration);
+}
+```
+
+## Burn Functions
+
+### burn
+
+Burns (destroys) tokens from an address.
+
+```rust
+fn burn(env: Env, from: Address, amount: i128)
+```
+
+**Parameters:**
+- `from` - The address holding the tokens (requires authorization)
+- `amount` - The amount to burn
+
+**Events:** Emits a `burn` event with topics `[from]` and data `amount`.
+
+### burn_from
+
+Burns tokens using an allowance.
+
+```rust
+fn burn_from(env: Env, spender: Address, from: Address, amount: i128)
+```
+
+**Parameters:**
+- `spender` - The address authorizing the burn (requires authorization)
+- `from` - The address holding the tokens
+- `amount` - The amount to burn
+
+**Events:** Emits a `burn` event.
+
+## Metadata Functions
+
+### decimals
+
+Returns the number of decimals used to represent token amounts.
+
+```rust
+fn decimals(env: Env) -> u32
+```
+
+**Example:**
+```rust
+use soroban_sdk::{Env, Address};
+use soroban_sdk::token::TokenClient;
+
+fn get_decimals(env: &Env, token: &Address) -> u32 {
+    let token = TokenClient::new(env, token);
+    token.decimals()
+}
+```
+
+### name
+
+Returns the name of the token.
+
+```rust
+fn name(env: Env) -> String
+```
+
+### symbol
+
+Returns the symbol of the token.
+
+```rust
+fn symbol(env: Env) -> String
+```
+
+## StellarAssetInterface
+
+Extended interface for Stellar Asset Contracts with admin capabilities.
+
+```rust
+pub trait StellarAssetInterface {
+    // Includes all TokenInterface methods plus:
+    // ...
+}
+```
+
+### StellarAssetClient
+
+Client for calling Stellar Asset Contract functions.
+
+```rust
+use soroban_sdk::token::StellarAssetClient;
+
+let asset = StellarAssetClient::new(&env, &asset_address);
+```
+
+## Admin Functions (Stellar Asset Contract)
+
+### admin
+
+Returns the admin address of the asset contract.
+
+```rust
+fn admin(env: Env) -> Address
+```
+
+### set_admin
+
+Sets a new administrator for the asset contract.
+
+```rust
+fn set_admin(env: Env, new_admin: Address)
+```
+
+**Parameters:**
+- `new_admin` - The new administrator address
+
+**Events:** Emits a `set_admin` event.
+
+### authorized
+
+Checks if an address is authorized to use the token.
+
+```rust
+fn authorized(env: Env, id: Address) -> bool
+```
+
+### set_authorized
+
+Sets whether an address is authorized.
+
+```rust
+fn set_authorized(env: Env, id: Address, authorize: bool)
+```
+
+**Parameters:**
+- `id` - The address to authorize/deauthorize
+- `authorize` - `true` to authorize, `false` to deauthorize
+
+**Events:** Emits a `set_authorized` event.
+
+### mint
+
+Mints new tokens to an address.
+
+```rust
+fn mint(env: Env, to: Address, amount: i128)
+```
+
+**Parameters:**
+- `to` - The recipient address
+- `amount` - The amount to mint
+
+**Events:** Emits a `mint` event with topics `[to]` and data `amount`.
+
+### clawback
+
+Claws back (burns) tokens from an address.
+
+```rust
+fn clawback(env: Env, from: Address, amount: i128)
+```
+
+**Parameters:**
+- `from` - The address to claw back from
+- `amount` - The amount to claw back
+
+**Events:** Emits a `clawback` event.
+
+## Examples
+
+### Simple Token Transfer
+
+```rust
+use soroban_sdk::{contract, contractimpl, Env, Address};
+use soroban_sdk::token::TokenClient;
+
+#[contract]
+pub struct PaymentProcessor;
+
+#[contractimpl]
+impl PaymentProcessor {
+    pub fn process_payment(
+        env: Env,
+        token: Address,
+        from: Address,
+        to: Address,
+        amount: i128
+    ) {
+        from.require_auth();
+        
+        let token = TokenClient::new(&env, &token);
+        token.transfer(&from, &to.into(), &amount);
+    }
+}
+```
+
+### Token Swap with Allowances
+
+```rust
+use soroban_sdk::{contract, contractimpl, Env, Address};
+use soroban_sdk::token::TokenClient;
+
+#[contract]
+pub struct TokenSwap;
+
+#[contractimpl]
+impl TokenSwap {
+    pub fn swap(
+        env: Env,
+        user: Address,
+        token_a: Address,
+        token_b: Address,
+        amount_a: i128,
+        amount_b: i128
+    ) {
+        user.require_auth();
+        
+        let contract = env.current_contract_address();
+        
+        let token_a_client = TokenClient::new(&env, &token_a);
+        let token_b_client = TokenClient::new(&env, &token_b);
+        
+        // Transfer token A from user to contract
+        token_a_client.transfer(&user, &contract.into(), &amount_a);
+        
+        // Transfer token B from contract to user
+        token_b_client.transfer(&contract, &user.into(), &amount_b);
+    }
+}
+```
+
+### Checking Token Balance
+
+```rust
+use soroban_sdk::{contract, contractimpl, Env, Address};
+use soroban_sdk::token::TokenClient;
+
+#[contract]
+pub struct BalanceChecker;
+
+#[contractimpl]
+impl BalanceChecker {
+    pub fn has_sufficient_balance(
+        env: Env,
+        token: Address,
+        account: Address,
+        required: i128
+    ) -> bool {
+        let token = TokenClient::new(&env, &token);
+        let balance = token.balance(&account);
+        balance >= required
+    }
+}
+```
+
+## Best Practices
+
+1. **Always require authorization**: Call `require_auth()` before token operations
+2. **Check balances**: Verify sufficient balance before transfers
+3. **Handle allowances carefully**: Set appropriate expiration times for allowances
+4. **Use events**: Monitor token events for tracking transfers and approvals
+5. **Test with Stellar Assets**: Test your contract with both custom tokens and Stellar Asset Contracts
+
+## See Also
+
+- [Address](/api/types/address) - For authorization and addresses
+- [MuxedAddress](/api/types/muxed-address) - For multiplexed addresses
+- [SEP-41](https://github.com/stellar/stellar-protocol/blob/master/ecosystem/sep-0041.md) - Token interface specification

@@ -1,0 +1,474 @@
+---
+title: Token Interface
+description: Working with tokens and the Stellar Asset Contract in Soroban
+---
+
+The Soroban SDK provides standardized interfaces for interacting with token contracts, including the Stellar Asset Contract (SAC). These interfaces follow the SEP-41 token standard.
+
+## TokenClient
+
+The `TokenClient` provides a type-safe interface for calling token contracts:
+
+```rust
+use soroban_sdk::{token::Client as TokenClient, Address, Env};
+
+let env = Env::default();
+let token_address = Address::generate(&env);
+let token = TokenClient::new(&env, &token_address);
+```
+
+## Token Interface Methods
+
+### Querying Token Information
+
+```rust
+use soroban_sdk::{token::Client as TokenClient, String};
+
+// Get token metadata
+let decimals: u32 = token.decimals();
+let name: String = token.name();
+let symbol: String = token.symbol();
+
+// Get account balance
+let balance: i128 = token.balance(&account_address);
+```
+
+### Transfers
+
+```rust
+use soroban_sdk::MuxedAddress;
+
+// Transfer tokens
+token.transfer(
+    &from,
+    &to,  // Can be Address or MuxedAddress
+    &amount
+);
+
+// Transfer with muxed address (includes memo)
+let to_muxed = MuxedAddress::new(&env, &to_address, 12345u64);
+token.transfer(&from, &to_muxed, &amount);
+```
+
+### Allowances
+
+Implement approval and delegated transfer patterns:
+
+```rust
+// Approve spender to use tokens
+let expiration_ledger = env.ledger().sequence() + 100;
+token.approve(
+    &owner,
+    &spender,
+    &amount,
+    &expiration_ledger
+);
+
+// Check allowance
+let allowance: i128 = token.allowance(&owner, &spender);
+
+// Transfer using allowance
+token.transfer_from(
+    &spender,  // The authorized spender
+    &owner,    // Owner of the tokens
+    &recipient,
+    &amount
+);
+```
+
+### Burning Tokens
+
+```rust
+// Burn tokens from account
+token.burn(&from, &amount);
+
+// Burn using allowance
+token.burn_from(&spender, &from, &amount);
+```
+
+## Stellar Asset Contract
+
+The Stellar Asset Contract (SAC) is the built-in token implementation for Stellar assets. It extends the basic token interface with administrative functions.
+
+### Using StellarAssetClient
+
+```rust
+use soroban_sdk::token::StellarAssetClient;
+
+let sac = StellarAssetClient::new(&env, &token_address);
+
+// All TokenClient methods, plus:
+
+// Admin functions
+let admin = sac.admin();
+sac.set_admin(&new_admin);
+
+// Authorization control
+let is_authorized = sac.authorized(&account);
+sac.set_authorized(&account, &true);
+
+// Minting (admin only)
+sac.mint(&recipient, &amount);
+
+// Clawback (admin only)
+sac.clawback(&from, &amount);
+```
+
+## Implementing Token Functionality
+
+### Creating a Custom Token
+
+```rust
+use soroban_sdk::{
+    contract, contractimpl, contracttype, token::TokenInterface,
+    Address, Env, String
+};
+
+#[contract]
+pub struct CustomToken;
+
+#[contractimpl]
+impl TokenInterface for CustomToken {
+    fn transfer(env: Env, from: Address, to: Address, amount: i128) {
+        from.require_auth();
+        
+        // Update balances
+        let mut from_balance = get_balance(&env, &from);
+        let mut to_balance = get_balance(&env, &to);
+        
+        from_balance -= amount;
+        to_balance += amount;
+        
+        set_balance(&env, &from, from_balance);
+        set_balance(&env, &to, to_balance);
+        
+        // Emit transfer event
+        TokenEvents::new(&env).transfer(from, to, amount);
+    }
+    
+    fn balance(env: Env, id: Address) -> i128 {
+        get_balance(&env, &id)
+    }
+    
+    fn decimals(env: Env) -> u32 {
+        7  // Default for Stellar assets
+    }
+    
+    fn name(env: Env) -> String {
+        String::from_str(&env, "My Token")
+    }
+    
+    fn symbol(env: Env) -> String {
+        String::from_str(&env, "MTK")
+    }
+    
+    // Implement other required methods...
+}
+```
+
+## Token Utilities (soroban-token-sdk)
+
+The `soroban-token-sdk` crate provides helper utilities for token contracts.
+
+### Token Metadata
+
+```rust
+use soroban_token_sdk::{TokenUtils, metadata::{TokenMetadata, Metadata}};
+use soroban_sdk::String;
+
+let token_utils = TokenUtils::new(&env);
+
+// Set token metadata
+let metadata = TokenMetadata {
+    decimal: 7,
+    name: String::from_str(&env, "My Token"),
+    symbol: String::from_str(&env, "MTK"),
+};
+token_utils.metadata().set_metadata(&metadata);
+
+// Get token metadata
+let stored = token_utils.metadata().get_metadata();
+```
+
+### Token Events
+
+Use standardized event types for token operations:
+
+```rust
+use soroban_token_sdk::events;
+use soroban_sdk::contractevent;
+
+// Transfer event
+events::Transfer {
+    from: from_address.clone(),
+    to: to_address.clone(),
+    amount,
+}.publish(&env);
+
+// Mint event
+events::Mint {
+    to: recipient.clone(),
+    amount,
+}.publish(&env);
+
+// Burn event
+events::Burn {
+    from: from_address.clone(),
+    amount,
+}.publish(&env);
+
+// Approve event
+events::Approve {
+    from: owner.clone(),
+    to: spender.clone(),
+    amount,
+    expiration_ledger,
+}.publish(&env);
+
+// Clawback event
+events::Clawback {
+    from: from_address.clone(),
+    amount,
+}.publish(&env);
+```
+
+## Testing with Tokens
+
+### Registering Token Contracts
+
+```rust
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use soroban_sdk::{testutils::Address as _, Address};
+    
+    #[test]
+    fn test_token_transfer() {
+        let env = Env::default();
+        
+        // Register Stellar Asset Contract
+        let admin = Address::generate(&env);
+        let sac = env.register_stellar_asset_contract_v2(admin.clone());
+        let token_address = sac.address();
+        
+        // Create token client
+        let token = TokenClient::new(&env, &token_address);
+        
+        // Test token operations
+        let user = Address::generate(&env);
+        let amount = 1000i128;
+        
+        sac.mint(&user, &amount);
+        assert_eq!(token.balance(&user), amount);
+    }
+}
+```
+
+### Mock Authentication
+
+```rust
+use soroban_sdk::testutils::{MockAuth, MockAuthInvoke};
+
+#[test]
+fn test_with_auth() {
+    let env = Env::default();
+    let token = TokenClient::new(&env, &token_address);
+    
+    let from = Address::generate(&env);
+    let to = Address::generate(&env);
+    
+    // Mock authentication for the transfer
+    token.mock_auths(&[MockAuth {
+        address: &from,
+        invoke: &MockAuthInvoke {
+            contract: &token_address,
+            fn_name: "transfer",
+            args: (&from, &to, 100i128).into_val(&env),
+            sub_invokes: &[],
+        },
+    }]).transfer(&from, &to, &100i128);
+}
+```
+
+### Setting Issuer Flags
+
+```rust
+use soroban_sdk::testutils::IssuerFlags;
+
+#[test]
+fn test_issuer_flags() {
+    let env = Env::default();
+    let admin = Address::generate(&env);
+    let sac = env.register_stellar_asset_contract_v2(admin);
+    
+    // Set authorization required
+    sac.issuer().set_flag(IssuerFlags::RequiredFlag);
+    
+    // Set revocable
+    sac.issuer().set_flag(IssuerFlags::RevocableFlag);
+    
+    // Check flags
+    let flags = sac.issuer().flags();
+    assert_eq!(
+        flags,
+        (IssuerFlags::RequiredFlag as u32) | (IssuerFlags::RevocableFlag as u32)
+    );
+}
+```
+
+## DeFi Patterns
+
+### Token Swaps
+
+```rust
+#[contract]
+pub struct SwapContract;
+
+#[contractimpl]
+impl SwapContract {
+    pub fn swap(
+        env: Env,
+        token_a: Address,
+        token_b: Address,
+        amount_a: i128,
+        min_amount_b: i128,
+        user: Address,
+    ) -> i128 {
+        user.require_auth();
+        
+        let token_a_client = TokenClient::new(&env, &token_a);
+        let token_b_client = TokenClient::new(&env, &token_b);
+        
+        // Transfer token A from user to contract
+        token_a_client.transfer(&user, &env.current_contract_address(), &amount_a);
+        
+        // Calculate swap amount
+        let amount_b = calculate_swap(&env, &token_a, &token_b, amount_a);
+        require!(amount_b >= min_amount_b, Error::SlippageExceeded);
+        
+        // Transfer token B to user
+        token_b_client.transfer(&env.current_contract_address(), &user, &amount_b);
+        
+        amount_b
+    }
+}
+```
+
+### Staking Contract
+
+```rust
+#[contractimpl]
+impl StakingContract {
+    pub fn stake(env: Env, user: Address, amount: i128) {
+        user.require_auth();
+        
+        let stake_token = get_stake_token(&env);
+        let token = TokenClient::new(&env, &stake_token);
+        
+        // Transfer tokens to contract
+        token.transfer(&user, &env.current_contract_address(), &amount);
+        
+        // Update stake balance
+        let current_stake = get_stake_balance(&env, &user);
+        set_stake_balance(&env, &user, current_stake + amount);
+    }
+    
+    pub fn unstake(env: Env, user: Address, amount: i128) {
+        user.require_auth();
+        
+        let stake_balance = get_stake_balance(&env, &user);
+        require!(stake_balance >= amount, Error::InsufficientStake);
+        
+        // Update stake balance
+        set_stake_balance(&env, &user, stake_balance - amount);
+        
+        // Return tokens to user
+        let stake_token = get_stake_token(&env);
+        let token = TokenClient::new(&env, &stake_token);
+        token.transfer(&env.current_contract_address(), &user, &amount);
+    }
+}
+```
+
+## Best Practices
+
+### Always Require Authentication
+
+```rust
+// ✅ Good: Requires auth before transfer
+pub fn transfer(env: Env, from: Address, to: Address, amount: i128) {
+    from.require_auth();
+    // ... perform transfer
+}
+
+// ❌ Bad: No auth check
+pub fn transfer(env: Env, from: Address, to: Address, amount: i128) {
+    // ... perform transfer - anyone can call!
+}
+```
+
+### Check Balances Before Operations
+
+```rust
+pub fn transfer(env: Env, from: Address, to: Address, amount: i128) {
+    from.require_auth();
+    
+    let balance = get_balance(&env, &from);
+    require!(balance >= amount, Error::InsufficientBalance);
+    
+    // Perform transfer...
+}
+```
+
+### Emit Events for All State Changes
+
+```rust
+use soroban_token_sdk::events;
+
+pub fn transfer(env: Env, from: Address, to: Address, amount: i128) {
+    from.require_auth();
+    
+    // Update balances...
+    
+    // Always emit events
+    events::Transfer { from, to, amount }.publish(&env);
+}
+```
+
+### Handle Muxed Addresses
+
+```rust
+use soroban_sdk::MuxedAddress;
+
+pub fn transfer(env: Env, from: Address, to: MuxedAddress, amount: i128) {
+    // Extract the underlying address
+    let to_address = to.address();
+    
+    // Optional: Get muxed ID for memo
+    let memo_id = to.muxed_id();  // Returns Option<u64>
+    
+    // Perform transfer to the address...
+}
+```
+
+## SEP-41 Compliance
+
+To be SEP-41 compliant, implement all required interface methods:
+
+- ✅ `allowance()`
+- ✅ `approve()`
+- ✅ `balance()`
+- ✅ `transfer()`
+- ✅ `transfer_from()`
+- ✅ `burn()`
+- ✅ `burn_from()`
+- ✅ `decimals()`
+- ✅ `name()`
+- ✅ `symbol()`
+
+## Related
+
+- [Cross-Contract Calls](/advanced/cross-contract-calls)
+- [Authentication](/core/authentication)
+- [Events](/guides/events)
+- [SEP-41 Token Standard](https://github.com/stellar/stellar-protocol/blob/master/ecosystem/sep-0041.md)

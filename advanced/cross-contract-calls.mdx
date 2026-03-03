@@ -1,0 +1,379 @@
+---
+title: Cross-Contract Calls
+description: Calling other contracts using contractimport in Soroban
+---
+
+Cross-contract calls allow your contract to interact with other deployed contracts on the network. The `contractimport` macro generates type-safe client code for calling external contracts.
+
+## Using contractimport
+
+The `contractimport` macro generates a client from a compiled WASM file:
+
+```rust
+use soroban_sdk::{contract, contractimpl, contractimport, Address, Env};
+
+// Import an external contract from WASM
+mod token_contract {
+    use crate as soroban_sdk;
+    soroban_sdk::contractimport!(
+        file = "../target/wasm32-unknown-unknown/release/token.wasm"
+    );
+}
+
+#[contract]
+pub struct MyContract;
+
+#[contractimpl]
+impl MyContract {
+    pub fn call_token(env: Env, token_id: Address, amount: i128) {
+        // Create a client for the external contract
+        let client = token_contract::Client::new(&env, &token_id);
+        
+        // Call functions on the external contract
+        client.transfer(&from, &to, &amount);
+    }
+}
+```
+
+## What contractimport Generates
+
+The macro generates several types:
+
+- **`Client`** - Type-safe client for calling the contract
+- **`WASM`** - The compiled WASM bytecode (as `&[u8]`)
+- Function-specific types and traits
+
+```rust
+mod addcontract {
+    use crate as soroban_sdk;
+    soroban_sdk::contractimport!(
+        file = "../target/wasm32-unknown-unknown/release/add.wasm"
+    );
+}
+
+// Now you can use:
+// - addcontract::Client
+// - addcontract::WASM
+```
+
+## Calling External Contracts
+
+### Basic Cross-Contract Call
+
+```rust
+use soroban_sdk::{contract, contractimpl, Address, Env};
+
+mod addcontract {
+    use crate as soroban_sdk;
+    soroban_sdk::contractimport!(
+        file = "../target/wasm32v1-none/release/test_add_u64.wasm"
+    );
+}
+
+#[contract]
+pub struct Contract;
+
+#[contractimpl]
+impl Contract {
+    pub fn add_with(env: Env, contract_id: Address, x: u64, y: u64) -> u64 {
+        // Create client and call external contract
+        addcontract::Client::new(&env, &contract_id).add(&x, &y)
+    }
+}
+```
+
+### Calling Token Contracts
+
+The SDK provides built-in support for token contracts:
+
+```rust
+use soroban_sdk::{contract, contractimpl, token::Client as TokenClient, Address, Env};
+
+#[contract]
+pub struct DeFiContract;
+
+#[contractimpl]
+impl DeFiContract {
+    pub fn transfer_tokens(
+        env: Env,
+        token: Address,
+        from: Address,
+        to: Address,
+        amount: i128
+    ) {
+        let token_client = TokenClient::new(&env, &token);
+        
+        // Call token contract functions
+        let balance = token_client.balance(&from);
+        token_client.transfer(&from, &to, &amount);
+    }
+    
+    pub fn approve_allowance(
+        env: Env,
+        token: Address,
+        from: Address,
+        spender: Address,
+        amount: i128,
+        expiration_ledger: u32
+    ) {
+        let token_client = TokenClient::new(&env, &token);
+        token_client.approve(&from, &spender, &amount, &expiration_ledger);
+    }
+}
+```
+
+## Importing Local Contract Definitions
+
+You can also call contracts defined in the same workspace:
+
+```rust
+// Define a contract in the same crate
+mod calculator {
+    use crate as soroban_sdk;
+    
+    #[soroban_sdk::contract]
+    pub struct Calculator;
+    
+    #[soroban_sdk::contractimpl]
+    impl Calculator {
+        pub fn add(a: u64, b: u64) -> u64 {
+            a + b
+        }
+        
+        pub fn multiply(a: u64, b: u64) -> u64 {
+            a * b
+        }
+    }
+}
+
+#[contract]
+pub struct MyContract;
+
+#[contractimpl]
+impl MyContract {
+    pub fn calculate(env: Env, calc_id: Address, x: u64, y: u64) -> u64 {
+        // Use the generated client for the local contract
+        let calc = calculator::CalculatorClient::new(&env, &calc_id);
+        
+        let sum = calc.add(&x, &y);
+        let product = calc.multiply(&x, &y);
+        sum + product
+    }
+}
+```
+
+## Registering Contracts in Tests
+
+### Register with Generated ID
+
+```rust
+#[test]
+fn test_cross_contract_call() {
+    let env = Env::default();
+    
+    // Register external contract, env generates ID
+    let external_id = env.register(addcontract::WASM, ());
+    
+    // Register your contract
+    let contract_id = env.register(Contract, ());
+    let client = ContractClient::new(&env, &contract_id);
+    
+    // Test the cross-contract call
+    let result = client.add_with(&external_id, &10u64, &12u64);
+    assert_eq!(result, 22);
+}
+```
+
+### Register at Specific ID
+
+```rust
+#[test]
+fn test_register_at_id() {
+    let env = Env::default();
+    
+    // Create a specific contract ID
+    let external_id = Address::from_contract_id(&env, [1; 32]);
+    
+    // Register at the specific ID
+    env.register_at(&external_id, addcontract::WASM, ());
+    
+    let contract_id = env.register(Contract, ());
+    let client = ContractClient::new(&env, &contract_id);
+    
+    let result = client.add_with(&external_id, &10u64, &12u64);
+    assert_eq!(result, 22);
+}
+```
+
+### Re-registering Contracts
+
+You can replace a contract's code at an existing ID:
+
+```rust
+#[test]
+fn test_reregister() {
+    let env = Env::default();
+    
+    // Register with one implementation
+    let contract_id = env.register(addcontract_v1::WASM, ());
+    
+    // Replace with different implementation
+    env.register_at(&contract_id, addcontract_v2::WASM, ());
+    
+    // Now calls go to v2 implementation
+    let client = ContractClient::new(&env, &contract_id);
+    let result = client.add(&10u64, &12u64);
+}
+```
+
+## Authentication and Authorization
+
+Cross-contract calls respect the authentication context:
+
+```rust
+#[contractimpl]
+impl DeFiContract {
+    pub fn deposit(
+        env: Env,
+        token: Address,
+        from: Address,
+        amount: i128
+    ) {
+        // Require authentication from the depositor
+        from.require_auth();
+        
+        let token_client = TokenClient::new(&env, &token);
+        
+        // Transfer requires auth from 'from' address
+        // Auth context is automatically propagated
+        token_client.transfer(&from, &env.current_contract_address(), &amount);
+    }
+}
+```
+
+## Error Handling
+
+Cross-contract calls panic if the external contract:
+
+- Doesn't exist at the given address
+- Panics or returns an error
+- Has an incompatible interface
+
+```rust
+#[contractimpl]
+impl MyContract {
+    pub fn safe_call(env: Env, external_id: Address) -> Result<u64, Error> {
+        // Contract will panic if external call fails
+        // Catch panics in your contract's error handling
+        let result = external::Client::new(&env, &external_id).compute();
+        Ok(result)
+    }
+}
+```
+
+## Best Practices
+
+### Store Contract Addresses
+
+```rust
+use soroban_sdk::{contracttype, symbol_short, Symbol};
+
+const TOKEN_KEY: Symbol = symbol_short!("TOKEN");
+
+#[contractimpl]
+impl MyContract {
+    pub fn initialize(env: Env, token_address: Address) {
+        env.storage().instance().set(&TOKEN_KEY, &token_address);
+    }
+    
+    pub fn use_token(env: Env, amount: i128) {
+        let token_address: Address = env.storage()
+            .instance()
+            .get(&TOKEN_KEY)
+            .unwrap();
+            
+        let token = TokenClient::new(&env, &token_address);
+        // Use token...
+    }
+}
+```
+
+### Validate Contract Addresses
+
+```rust
+pub fn set_token(env: Env, token: Address) -> Result<(), Error> {
+    // Validate the address points to a valid token contract
+    let token_client = TokenClient::new(&env, &token);
+    
+    // This will panic if not a valid token
+    let _ = token_client.decimals();
+    
+    env.storage().instance().set(&TOKEN_KEY, &token);
+    Ok(())
+}
+```
+
+### Minimize Cross-Contract Calls
+
+Each cross-contract call has overhead:
+
+```rust
+// ❌ Inefficient: Multiple calls
+let balance1 = token.balance(&addr1);
+let balance2 = token.balance(&addr2);
+let balance3 = token.balance(&addr3);
+
+// ✅ Better: Batch operations if the contract supports it
+let balances = token.get_balances(&vec![&env, addr1, addr2, addr3]);
+```
+
+## Common Patterns
+
+### Factory Pattern
+
+```rust
+#[contract]
+pub struct Factory;
+
+#[contractimpl]
+impl Factory {
+    pub fn create_instance(env: Env, salt: BytesN<32>) -> Address {
+        // Deploy a new contract instance
+        let instance_id = env.deployer()
+            .with_current_contract(salt)
+            .deploy(instance_contract::WASM);
+            
+        // Initialize the new instance
+        let client = instance_contract::Client::new(&env, &instance_id);
+        client.initialize();
+        
+        instance_id
+    }
+}
+```
+
+### Proxy Pattern
+
+```rust
+#[contract]
+pub struct Proxy;
+
+#[contractimpl]
+impl Proxy {
+    pub fn forward_call(
+        env: Env,
+        target: Address,
+        amount: i128
+    ) -> i128 {
+        // Forward call to target contract
+        let target_client = external::Client::new(&env, &target);
+        target_client.process(&amount)
+    }
+}
+```
+
+## Related
+
+- [Token Interface](/advanced/token-interface)
+- [Contract Deployment](/guides/deploying)
+- [Authentication](/core/authentication)

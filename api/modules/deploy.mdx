@@ -1,0 +1,375 @@
+---
+title: "deploy"
+description: "Contract deployment and management functions"
+---
+
+The `deploy` module provides types and functions for deploying contracts, uploading contract code, and managing contract lifecycles.
+
+## Overview
+
+Contracts are deployed with a deterministic address derived from a deployer address and salt. Access deployment functions through `env.deployer()` in your contracts.
+
+## Types
+
+### Deployer
+
+Provides access to contract deployment functions.
+
+```rust
+pub struct Deployer {
+    // ...
+}
+```
+
+Obtain via `env.deployer()` in contract code.
+
+### DeployerWithAddress
+
+A deployer configured with a specific address and salt for deterministic contract deployment.
+
+```rust
+pub struct DeployerWithAddress {
+    // ...
+}
+```
+
+### DeployerWithAsset
+
+A deployer for Stellar Asset Contracts.
+
+```rust
+pub struct DeployerWithAsset {
+    // ...
+}
+```
+
+## Deployer Methods
+
+### with_current_contract
+
+Creates a deployer that derives contract IDs from the current contract and provided salt.
+
+```rust
+pub fn with_current_contract(
+    &self,
+    salt: impl IntoVal<Env, BytesN<32>>
+) -> DeployerWithAddress
+```
+
+**Example:**
+```rust
+use soroban_sdk::{contract, contractimpl, Env, BytesN};
+
+#[contract]
+pub struct Contract;
+
+#[contractimpl]
+impl Contract {
+    pub fn deploy(env: Env, wasm_hash: BytesN<32>) {
+        let salt = [0u8; 32];
+        let deployer = env.deployer().with_current_contract(salt);
+        let contract_address = deployer.deploy_v2(wasm_hash, ());
+    }
+}
+```
+
+### with_address
+
+Creates a deployer that derives contract IDs from a specific address and salt.
+
+```rust
+pub fn with_address(
+    &self,
+    address: Address,
+    salt: impl IntoVal<Env, BytesN<32>>
+) -> DeployerWithAddress
+```
+
+**Note:** The deployer address must authorize all deployments.
+
+### with_stellar_asset
+
+Creates a deployer for a Stellar Asset Contract.
+
+```rust
+pub fn with_stellar_asset(
+    &self,
+    serialized_asset: impl IntoVal<Env, Bytes>
+) -> DeployerWithAsset
+```
+
+**Parameters:**
+- `serialized_asset` - XDR-serialized Stellar `Asset`
+
+### upload_contract_wasm
+
+Uploads contract Wasm code to the network.
+
+```rust
+pub fn upload_contract_wasm(
+    &self,
+    contract_wasm: impl IntoVal<Env, Bytes>
+) -> BytesN<32>
+```
+
+**Returns:** Hash of the uploaded Wasm that can be used for deployment.
+
+**Example:**
+```rust
+use soroban_sdk::{Env, BytesN};
+
+const WASM: &[u8] = include_bytes!("contract.wasm");
+
+#[test]
+fn test() {
+    let env = Env::default();
+    let wasm_hash = env.deployer().upload_contract_wasm(WASM);
+    // Use wasm_hash for deployment
+}
+```
+
+### update_current_contract_wasm
+
+Replaces the current contract's executable with new Wasm.
+
+```rust
+pub fn update_current_contract_wasm(
+    &self,
+    wasm_hash: impl IntoVal<Env, BytesN<32>>
+)
+```
+
+**Note:** The Wasm must already be uploaded. The update takes effect after the invocation successfully completes.
+
+### extend_ttl
+
+Extends the TTL (Time To Live) of contract instance and code.
+
+```rust
+pub fn extend_ttl(
+    &self,
+    contract_address: Address,
+    threshold: u32,
+    extend_to: u32
+)
+```
+
+**Parameters:**
+- `contract_address` - Contract to extend TTL for
+- `threshold` - Only extend if current TTL is below this
+- `extend_to` - New TTL value in ledgers
+
+Extends both instance and code TTL. Either or both may be extended depending on current TTL values.
+
+### extend_ttl_for_contract_instance
+
+Extends only the contract instance TTL.
+
+```rust
+pub fn extend_ttl_for_contract_instance(
+    &self,
+    contract_address: Address,
+    threshold: u32,
+    extend_to: u32
+)
+```
+
+### extend_ttl_for_code
+
+Extends only the contract code TTL.
+
+```rust
+pub fn extend_ttl_for_code(
+    &self,
+    contract_address: Address,
+    threshold: u32,
+    extend_to: u32
+)
+```
+
+## DeployerWithAddress Methods
+
+### deployed_address
+
+Returns the deterministic address where the contract will be deployed.
+
+```rust
+pub fn deployed_address(&self) -> Address
+```
+
+Can be called before or after deployment since addresses are deterministic.
+
+**Example:**
+```rust
+use soroban_sdk::{contract, contractimpl, Env, Address};
+
+#[contract]
+pub struct Contract;
+
+#[contractimpl]
+impl Contract {
+    pub fn get_deploy_address(env: Env) -> Address {
+        let salt = [1u8; 32];
+        let deployer = env.deployer().with_current_contract(salt);
+        deployer.deployed_address()
+    }
+}
+```
+
+### deploy_v2
+
+Deploys a contract with the specified Wasm hash and constructor arguments.
+
+```rust
+pub fn deploy_v2<A>(
+    &self,
+    wasm_hash: impl IntoVal<Env, BytesN<32>>,
+    constructor_args: A
+) -> Address
+where
+    A: ConstructorArgs
+```
+
+**Parameters:**
+- `wasm_hash` - Hash of uploaded Wasm code
+- `constructor_args` - Arguments for the contract constructor (use `()` for none)
+
+**Returns:** Address of the deployed contract.
+
+**Example with constructor:**
+```rust
+use soroban_sdk::{contract, contractimpl, Env, BytesN};
+
+#[contract]
+pub struct Contract;
+
+#[contractimpl]
+impl Contract {
+    pub fn deploy_with_args(env: Env, wasm_hash: BytesN<32>) {
+        let salt = [1u8; 32];
+        let deployer = env.deployer().with_current_contract(salt);
+        // Deploy with constructor arguments
+        let address = deployer.deploy_v2(wasm_hash, (1_u32, 2_i64));
+    }
+}
+```
+
+### deploy (deprecated)
+
+```rust
+#[deprecated(note = "use deploy_v2")]
+pub fn deploy(
+    &self,
+    wasm_hash: impl IntoVal<Env, BytesN<32>>
+) -> Address
+```
+
+Use `deploy_v2` instead.
+
+## DeployerWithAsset Methods
+
+### deployed_address
+
+Returns the deterministic address for the Stellar Asset Contract.
+
+```rust
+pub fn deployed_address(&self) -> Address
+```
+
+### deploy
+
+Deploys the Stellar Asset Contract.
+
+```rust
+pub fn deploy(&self) -> Address
+```
+
+## Examples
+
+### Deploy Without Constructor
+
+```rust
+use soroban_sdk::{contract, contractimpl, BytesN, Env};
+
+const WASM: &[u8] = include_bytes!("contract.wasm");
+
+#[contract]
+pub struct Contract;
+
+#[contractimpl]
+impl Contract {
+    pub fn deploy(env: Env, wasm_hash: BytesN<32>) -> Address {
+        let salt = [0u8; 32];
+        let deployer = env.deployer().with_current_contract(salt);
+        deployer.deploy_v2(wasm_hash, ())
+    }
+}
+```
+
+### Deploy With Constructor
+
+```rust
+use soroban_sdk::{contract, contractimpl, BytesN, Env};
+
+#[contract]
+pub struct Contract;
+
+#[contractimpl]
+impl Contract {
+    pub fn deploy_with_init(
+        env: Env,
+        wasm_hash: BytesN<32>,
+        admin: Address,
+        amount: i128
+    ) -> Address {
+        let salt = [0u8; 32];
+        let deployer = env.deployer().with_current_contract(salt);
+        deployer.deploy_v2(wasm_hash, (admin, amount))
+    }
+}
+```
+
+### Get Address Before Deploying
+
+```rust
+use soroban_sdk::{contract, contractimpl, Env, Address};
+
+#[contract]
+pub struct Contract;
+
+#[contractimpl]
+impl Contract {
+    pub fn get_address(env: Env) -> Address {
+        let salt = [0u8; 32];
+        let deployer = env.deployer().with_current_contract(salt);
+        // Get address without deploying
+        deployer.deployed_address()
+    }
+}
+```
+
+## Test Utilities
+
+When the `testutils` feature is enabled, additional functions are available:
+
+### get_contract_instance_ttl
+
+Gets the TTL of a contract instance in test environments.
+
+```rust
+pub fn get_contract_instance_ttl(&self, contract: &Address) -> u32
+```
+
+### get_contract_code_ttl
+
+Gets the TTL of contract code in test environments.
+
+```rust
+pub fn get_contract_code_ttl(&self, contract: &Address) -> u32
+```
+
+## See Also
+
+- [Env](/api/types/env) - For accessing the deployer
+- [Address](/api/types/address) - For contract addresses
+- [Bytes](/api/types/bytes) - For byte arrays and fixed-size BytesN

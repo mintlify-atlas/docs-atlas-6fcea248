@@ -1,0 +1,190 @@
+---
+title: "#[contracttype]"
+description: "Generates conversions from/into Val for types that can be used as contract function arguments and return values"
+---
+
+Generates conversions from/into `Val` for types that can be used as contract function arguments and return values.
+
+Includes the type in the contract spec so that clients can generate bindings for the type.
+
+## Syntax
+
+```rust
+#[contracttype]
+pub struct StructName {
+    // fields
+}
+
+#[contracttype]
+pub enum EnumName {
+    // variants
+}
+```
+
+## Parameters
+
+<ParamField path="crate_path" type="Path" default="soroban_sdk">
+  Optional path to the Soroban SDK crate. Use this if you've renamed the crate in your `Cargo.toml`.
+</ParamField>
+
+<ParamField path="export" type="bool">
+  Whether to include this type in the contract specification. If not specified, types are exported if they are `pub`.
+</ParamField>
+
+<ParamField path="lib" type="String">
+  Optional library name for organizing types in the contract specification.
+</ParamField>
+
+## Supported Types
+
+### Structs
+- Structs with named fields are supported
+- Tuple structs are supported
+- All fields must be of a type that is also convertible to and from `Val`
+- Unit structs are not supported
+
+### Enums
+- **Unit enums**: All variants are unit variants (no fields)
+- **Tuple enums**: Variants with a maximum of one tuple field. The field must be convertible to/from `Val`
+- **Integer enums**: All variants have an explicit integer literal value
+- Struct-like enum variants are not supported
+- Mixed enum types (some int, some unit) are not supported
+
+### Naming Constraints
+
+All variant names, field names, and type names must be 10 characters or less in length.
+
+## Examples
+
+### Struct Example
+
+Defining a contract type that is a struct and use it in a contract.
+
+```rust
+use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Env, Symbol};
+
+#[contracttype]
+#[derive(Clone, Default, Debug, Eq, PartialEq)]
+pub struct State {
+    pub count: u32,
+    pub last_incr: u32,
+}
+
+#[contract]
+pub struct Contract;
+
+#[contractimpl]
+impl Contract {
+    /// Increment increments an internal counter, and returns the value.
+    pub fn increment(env: Env, incr: u32) -> u32 {
+        // Get the current count.
+        let mut state = Self::get_state(env.clone());
+
+        // Increment the count.
+        state.count += incr;
+        state.last_incr = incr;
+
+        // Save the count.
+        env.storage().persistent().set(&symbol_short!("STATE"), &state);
+
+        // Return the count to the caller.
+        state.count
+    }
+
+    /// Return the current state.
+    pub fn get_state(env: Env) -> State {
+        env.storage().persistent()
+            .get(&symbol_short!("STATE"))
+            .unwrap_or_else(|| State::default())
+    }
+}
+
+#[test]
+fn test() {
+    let env = Env::default();
+    let contract_id = env.register(Contract, ());
+    let client = ContractClient::new(&env, &contract_id);
+
+    assert_eq!(client.increment(&1), 1);
+    assert_eq!(client.increment(&10), 11);
+    assert_eq!(
+        client.get_state(),
+        State {
+            count: 11,
+            last_incr: 10,
+        },
+    );
+}
+```
+
+### Enum Examples
+
+Defining contract types that are three different types of enums and using them in a contract.
+
+```rust
+use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Symbol, Env};
+
+/// A tuple enum is stored as a two-element vector containing the name of
+/// the enum variant as a Symbol, then the value in the tuple.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum Color {
+    Red(Intensity),
+    Blue(Shade),
+}
+
+/// A unit enum is stored as a single-element vector containing the name of
+/// the enum variant as a Symbol.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum Shade {
+    Light,
+    Dark,
+}
+
+/// An integer enum is stored as its integer value.
+#[contracttype]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[repr(u32)]
+pub enum Intensity {
+    Low = 1,
+    High = 2,
+}
+
+#[contract]
+pub struct Contract;
+
+#[contractimpl]
+impl Contract {
+    /// Set the color.
+    pub fn set(env: Env, c: Color) {
+        env.storage().persistent().set(&symbol_short!("COLOR"), &c);
+    }
+
+    /// Get the color.
+    pub fn get(env: Env) -> Option<Color> {
+        env.storage().persistent()
+            .get(&symbol_short!("COLOR"))
+    }
+}
+
+#[test]
+fn test() {
+    let env = Env::default();
+    let contract_id = env.register(Contract, ());
+    let client = ContractClient::new(&env, &contract_id);
+
+    assert_eq!(client.get(), None);
+
+    client.set(&Color::Red(Intensity::High));
+    assert_eq!(client.get(), Some(Color::Red(Intensity::High)));
+
+    client.set(&Color::Blue(Shade::Light));
+    assert_eq!(client.get(), Some(Color::Blue(Shade::Light)));
+}
+```
+
+## See Also
+
+- [`#[contracterror]`](/api/macros/contracterror) - Define contract error types
+- [`#[contractevent]`](/api/macros/contractevent) - Define contract event types

@@ -1,0 +1,623 @@
+---
+title: 'Instance Storage'
+description: 'API reference for Soroban instance storage operations'
+---
+
+## Overview
+
+Instance storage is optimized for small amounts of contract-level configuration data. Access instance storage via `env.storage().instance()`.
+
+**Key Properties:**
+- Stored within the contract instance entry itself
+- Loaded automatically with every contract invocation
+- Shares TTL with the contract instance and code
+- Limited by ledger entry size (~100 KB serialized)
+- Does not appear in ledger footprint
+- Best for: Admin accounts, contract settings, metadata, token references
+
+<Warning>
+**Important:** Instance storage should only be used for small, frequently-accessed data. Never use it for unbounded data like user balances or per-user settings.
+</Warning>
+
+## Type Definition
+
+```rust
+pub struct Instance {
+    storage: Storage,
+}
+```
+
+Access through the `Storage` type:
+
+```rust
+let instance = env.storage().instance();
+```
+
+## Methods
+
+### has
+
+Checks if a value exists for the given key.
+
+```rust
+pub fn has<K>(&self, key: &K) -> bool
+where
+    K: IntoVal<Env, Val>,
+```
+
+**Parameters:**
+- `key`: The key to check
+
+**Returns:** `true` if a value exists, `false` otherwise
+
+**Example:**
+```rust
+use soroban_sdk::{contract, contractimpl, Env, symbol_short};
+
+#[contract]
+pub struct Contract;
+
+#[contractimpl]
+impl Contract {
+    pub fn is_initialized(env: Env) -> bool {
+        env.storage().instance().has(&symbol_short!("admin"))
+    }
+}
+```
+
+---
+
+### get
+
+Retrieves a value for the given key.
+
+```rust
+pub fn get<K, V>(&self, key: &K) -> Option<V>
+where
+    V::Error: Debug,
+    K: IntoVal<Env, Val>,
+    V: TryFromVal<Env, Val>,
+```
+
+**Parameters:**
+- `key`: The key to retrieve
+
+**Returns:** `Some(V)` if the value exists, `None` otherwise
+
+**Panics:** If the stored value cannot be converted to type `V`
+
+**Example:**
+```rust
+use soroban_sdk::{contract, contractimpl, Env, Address, symbol_short};
+
+#[contract]
+pub struct TokenContract;
+
+#[contractimpl]
+impl TokenContract {
+    pub fn get_admin(env: Env) -> Option<Address> {
+        env.storage()
+            .instance()
+            .get(&symbol_short!("admin"))
+    }
+    
+    pub fn get_token_name(env: Env) -> String {
+        env.storage()
+            .instance()
+            .get(&symbol_short!("name"))
+            .unwrap_or(String::from_str(&env, "Unknown"))
+    }
+}
+```
+
+---
+
+### set
+
+Stores a value for the given key.
+
+```rust
+pub fn set<K, V>(&self, key: &K, val: &V)
+where
+    K: IntoVal<Env, Val>,
+    V: IntoVal<Env, Val>,
+```
+
+**Parameters:**
+- `key`: The key to store under
+- `val`: The value to store
+
+**Example:**
+```rust
+use soroban_sdk::{contract, contractimpl, Env, Address, String, symbol_short};
+
+#[contract]
+pub struct TokenContract;
+
+#[contractimpl]
+impl TokenContract {
+    pub fn initialize(env: Env, admin: Address, name: String, symbol: String) {
+        // Store contract configuration in instance storage
+        env.storage().instance().set(&symbol_short!("admin"), &admin);
+        env.storage().instance().set(&symbol_short!("name"), &name);
+        env.storage().instance().set(&symbol_short!("symbol"), &symbol);
+        
+        // Extend instance TTL for 1 year (~5.25M ledgers)
+        env.storage().instance().extend_ttl(100000, 5_250_000);
+    }
+}
+```
+
+---
+
+### update
+
+Updates a value by applying a function to the current value.
+
+```rust
+pub fn update<K, V>(&self, key: &K, f: impl FnOnce(Option<V>) -> V) -> V
+where
+    K: IntoVal<Env, Val>,
+    V: IntoVal<Env, Val>,
+    V: TryFromVal<Env, Val>,
+```
+
+**Parameters:**
+- `key`: The key to update
+- `f`: Function that receives current value (or `None`) and returns new value
+
+**Returns:** The new value after update
+
+**Example:**
+```rust
+use soroban_sdk::{contract, contractimpl, Env, symbol_short};
+
+#[contract]
+pub struct Contract;
+
+#[contractimpl]
+impl Contract {
+    pub fn increment_version(env: Env) -> u32 {
+        env.storage().instance().update(
+            &symbol_short!("version"),
+            |version: Option<u32>| version.unwrap_or(0) + 1
+        )
+    }
+    
+    pub fn toggle_paused(env: Env) -> bool {
+        env.storage().instance().update(
+            &symbol_short!("paused"),
+            |paused: Option<bool>| !paused.unwrap_or(false)
+        )
+    }
+}
+```
+
+---
+
+### try_update
+
+Updates a value by applying a fallible function.
+
+```rust
+pub fn try_update<K, V, E>(
+    &self,
+    key: &K,
+    f: impl FnOnce(Option<V>) -> Result<V, E>,
+) -> Result<V, E>
+where
+    K: IntoVal<Env, Val>,
+    V: IntoVal<Env, Val>,
+    V: TryFromVal<Env, Val>,
+```
+
+**Parameters:**
+- `key`: The key to update
+- `f`: Fallible function that receives current value and returns `Result<V, E>`
+
+**Returns:** `Ok(V)` with the new value, or `Err(E)` if the function fails
+
+**Example:**
+```rust
+use soroban_sdk::{
+    contract, contractimpl, contracterror, Env, Address, symbol_short
+};
+
+#[contracterror]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum Error {
+    AlreadyInitialized = 1,
+    InvalidValue = 2,
+}
+
+#[contract]
+pub struct Contract;
+
+#[contractimpl]
+impl Contract {
+    pub fn set_admin(env: Env, new_admin: Address) -> Result<(), Error> {
+        let key = symbol_short!("admin");
+        env.storage().instance().try_update(&key, |current: Option<Address>| {
+            if current.is_some() {
+                Err(Error::AlreadyInitialized)
+            } else {
+                Ok(new_admin.clone())
+            }
+        })?;
+        Ok(())
+    }
+}
+```
+
+---
+
+### remove
+
+Removes a key and its value from storage.
+
+```rust
+pub fn remove<K>(&self, key: &K)
+where
+    K: IntoVal<Env, Val>,
+```
+
+**Parameters:**
+- `key`: The key to remove
+
+**Behavior:** No-op if the key doesn't exist
+
+**Example:**
+```rust
+use soroban_sdk::{contract, contractimpl, Env, symbol_short};
+
+#[contract]
+pub struct Contract;
+
+#[contractimpl]
+impl Contract {
+    pub fn clear_admin(env: Env) {
+        env.storage().instance().remove(&symbol_short!("admin"));
+    }
+}
+```
+
+---
+
+### extend_ttl
+
+Extends the TTL of the contract instance and code.
+
+```rust
+pub fn extend_ttl(&self, threshold: u32, extend_to: u32)
+```
+
+**Parameters:**
+- `threshold`: Only extend if TTL is below this value (in ledgers)
+- `extend_to`: New TTL value when extended (in ledgers)
+
+**Behavior:**
+- Extends both contract instance and contract code TTL
+- Only extends if current TTL < threshold
+- Each (instance and code) may be extended independently based on their current TTLs
+- Sets TTL to `extend_to` ledgers from current ledger
+
+<Note>
+**Important:** Unlike persistent and temporary storage, instance `extend_ttl()` does not take a key parameter. It extends the TTL of the entire contract instance and its code.
+</Note>
+
+**Example:**
+```rust
+use soroban_sdk::{contract, contractimpl, Env, Address};
+
+#[contract]
+pub struct TokenContract;
+
+#[contractimpl]
+impl TokenContract {
+    pub fn initialize(env: Env, admin: Address) {
+        env.storage().instance().set(&symbol_short!("admin"), &admin);
+        
+        // Extend contract instance TTL for ~1 year
+        // Threshold: 100,000 ledgers (~5.5 days)
+        // Extend to: 5,250,000 ledgers (~1 year)
+        env.storage().instance().extend_ttl(100_000, 5_250_000);
+    }
+    
+    pub fn bump_instance(env: Env) {
+        // Regularly extend instance TTL on contract interactions
+        // Extend if TTL drops below ~30 days, extend to ~1 year
+        env.storage().instance().extend_ttl(518_400, 5_250_000);
+    }
+}
+```
+
+**TTL Guidelines for Instance Storage:**
+- Short-lived contracts: 100,000 ledgers (~5.5 days)
+- Medium-term contracts: 1,000,000 ledgers (~55 days)
+- Long-term contracts: 5,250,000 ledgers (~1 year)
+- Critical contracts: Extend on every significant interaction
+
+## Complete Example
+
+Here's a complete contract demonstrating instance storage usage:
+
+```rust
+use soroban_sdk::{
+    contract, contractimpl, contracterror, Env, Address, String, symbol_short
+};
+
+#[derive(Clone)]
+pub struct TokenMetadata {
+    pub name: String,
+    pub symbol: String,
+    pub decimals: u32,
+}
+
+#[contracterror]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum Error {
+    AlreadyInitialized = 1,
+    Unauthorized = 2,
+    ContractPaused = 3,
+}
+
+#[contract]
+pub struct TokenContract;
+
+#[contractimpl]
+impl TokenContract {
+    const INSTANCE_TTL_THRESHOLD: u32 = 518_400;  // ~30 days
+    const INSTANCE_TTL_EXTEND_TO: u32 = 5_250_000; // ~1 year
+    
+    /// Initialize the token contract
+    pub fn initialize(
+        env: Env,
+        admin: Address,
+        name: String,
+        symbol: String,
+        decimals: u32,
+    ) -> Result<(), Error> {
+        let storage = env.storage().instance();
+        
+        // Check if already initialized
+        if storage.has(&symbol_short!("admin")) {
+            return Err(Error::AlreadyInitialized);
+        }
+        
+        // Store admin
+        storage.set(&symbol_short!("admin"), &admin);
+        
+        // Store token metadata
+        let metadata = TokenMetadata {
+            name,
+            symbol,
+            decimals,
+        };
+        storage.set(&symbol_short!("metadata"), &metadata);
+        
+        // Initialize paused state to false
+        storage.set(&symbol_short!("paused"), &false);
+        
+        // Extend instance TTL
+        storage.extend_ttl(Self::INSTANCE_TTL_THRESHOLD, Self::INSTANCE_TTL_EXTEND_TO);
+        
+        Ok(())
+    }
+    
+    /// Get contract admin
+    pub fn admin(env: Env) -> Address {
+        env.storage()
+            .instance()
+            .get(&symbol_short!("admin"))
+            .unwrap()
+    }
+    
+    /// Get token metadata
+    pub fn metadata(env: Env) -> TokenMetadata {
+        env.storage()
+            .instance()
+            .get(&symbol_short!("metadata"))
+            .unwrap()
+    }
+    
+    /// Check if contract is paused
+    pub fn is_paused(env: Env) -> bool {
+        env.storage()
+            .instance()
+            .get(&symbol_short!("paused"))
+            .unwrap_or(false)
+    }
+    
+    /// Set paused state (admin only)
+    pub fn set_paused(env: Env, paused: bool) -> Result<(), Error> {
+        let admin = Self::admin(env.clone());
+        admin.require_auth();
+        
+        env.storage().instance().set(&symbol_short!("paused"), &paused);
+        env.storage().instance().extend_ttl(
+            Self::INSTANCE_TTL_THRESHOLD,
+            Self::INSTANCE_TTL_EXTEND_TO,
+        );
+        
+        Ok(())
+    }
+    
+    /// Transfer admin rights (current admin only)
+    pub fn transfer_admin(env: Env, new_admin: Address) -> Result<(), Error> {
+        let admin = Self::admin(env.clone());
+        admin.require_auth();
+        
+        env.storage().instance().set(&symbol_short!("admin"), &new_admin);
+        env.storage().instance().extend_ttl(
+            Self::INSTANCE_TTL_THRESHOLD,
+            Self::INSTANCE_TTL_EXTEND_TO,
+        );
+        
+        Ok(())
+    }
+    
+    /// Internal helper to check paused state
+    fn require_not_paused(env: &Env) -> Result<(), Error> {
+        if Self::is_paused(env.clone()) {
+            Err(Error::ContractPaused)
+        } else {
+            Ok(())
+        }
+    }
+    
+    /// Bump contract instance TTL
+    pub fn bump(env: Env) {
+        env.storage().instance().extend_ttl(
+            Self::INSTANCE_TTL_THRESHOLD,
+            Self::INSTANCE_TTL_EXTEND_TO,
+        );
+    }
+}
+```
+
+## Instance Storage Characteristics
+
+### Automatic Loading
+
+Instance storage is loaded with every contract invocation:
+
+```rust
+// Instance data is ALWAYS loaded, even if you don't access it
+pub fn some_function(env: Env) {
+    // Instance storage already loaded at this point
+    // No additional cost to access instance data
+    let admin = env.storage().instance().get(&symbol_short!("admin"));
+}
+```
+
+### Size Limitations
+
+<Warning>
+Instance storage is limited to the ledger entry size (~100 KB serialized).
+</Warning>
+
+**Good uses:**
+```rust
+// Small, fixed-size data
+env.storage().instance().set(&symbol_short!("admin"), &admin_address);
+env.storage().instance().set(&symbol_short!("paused"), &false);
+env.storage().instance().set(&symbol_short!("fee_rate"), &250_u32);
+```
+
+**Bad uses:**
+```rust
+// DO NOT: User-specific data (unbounded)
+env.storage().instance().set(&user_address, &balance);
+
+// DO NOT: Large collections
+env.storage().instance().set(&symbol_short!("all_users"), &user_list);
+```
+
+### Shared TTL
+
+Instance storage shares TTL with the contract instance:
+
+- Extending instance TTL extends the contract's lifetime
+- If instance TTL expires, the entire contract becomes inaccessible
+- Both contract code and instance are extended together
+
+## Best Practices
+
+1. **Store only small, contract-level data**
+   - Configuration settings
+   - Admin addresses
+   - Contract metadata
+   - Feature flags
+
+2. **Never store user-specific data**
+   - Use persistent storage for user balances
+   - Use persistent storage for user-specific settings
+
+3. **Extend TTL regularly**
+   - Extend on initialization
+   - Extend on admin operations
+   - Consider extending on every interaction for critical contracts
+
+4. **Keep data small**
+   - Monitor total instance storage size
+   - Avoid storing large strings or collections
+   - Use compact data structures
+
+5. **Leverage automatic loading**
+   - Instance data is always loaded, so access is "free"
+   - Good for frequently accessed configuration
+
+## Test Utilities
+
+When the `testutils` feature is enabled, additional methods are available:
+
+```rust
+#[cfg(test)]
+mod test {
+    use super::*;
+    use soroban_sdk::{Env, testutils::storage::Instance};
+    
+    #[test]
+    fn test_instance_storage() {
+        let env = Env::default();
+        let contract_id = env.register(TokenContract, ());
+        
+        // Get all instance storage entries
+        let instance = env.storage().instance();
+        let all_data = instance.all();
+        
+        // Get instance TTL
+        let ttl = instance.get_ttl();
+        
+        assert!(ttl > 0);
+    }
+}
+```
+
+## Common Patterns
+
+### Initialization Check
+
+```rust
+pub fn initialize(env: Env, admin: Address) -> Result<(), Error> {
+    if env.storage().instance().has(&symbol_short!("admin")) {
+        return Err(Error::AlreadyInitialized);
+    }
+    env.storage().instance().set(&symbol_short!("admin"), &admin);
+    Ok(())
+}
+```
+
+### Admin Guard
+
+```rust
+fn require_admin(env: &Env) -> Result<(), Error> {
+    let admin: Address = env.storage()
+        .instance()
+        .get(&symbol_short!("admin"))
+        .ok_or(Error::NotInitialized)?;
+    admin.require_auth();
+    Ok(())
+}
+```
+
+### Feature Flags
+
+```rust
+pub fn is_feature_enabled(env: &Env, feature: Symbol) -> bool {
+    env.storage()
+        .instance()
+        .get(&feature)
+        .unwrap_or(false)
+}
+```
+
+## See Also
+
+- [Storage Overview](/api/storage/overview) - Overview of all storage types
+- [Persistent Storage](/api/storage/persistent) - Long-term persistent storage
+- [Temporary Storage](/api/storage/temporary) - Lower-cost temporary storage
+
+## Source Reference
+
+Implementation: `soroban-sdk/src/storage.rs:479-569`

@@ -1,0 +1,204 @@
+---
+title: "#[contractevent]"
+description: "Generates conversions from a struct into a published event"
+---
+
+Generates conversions from a struct into a published event.
+
+Fields of the struct become topics and data parameters in the published event. Includes the event in the contract spec so that clients can generate bindings for the type and downstream systems can understand the meaning of the event.
+
+## Syntax
+
+```rust
+#[contractevent]
+pub struct EventName {
+    #[topic]
+    pub topic_field: Type,
+    pub data_field: Type,
+}
+```
+
+## Parameters
+
+<ParamField path="topics" type="&[&str]">
+  Optional custom list of fixed topic strings. If not specified, the event name in snake_case is used as the single fixed topic.
+</ParamField>
+
+<ParamField path="data_format" type="&str" default="map">
+  Format for the event data. Options:
+  - `"map"` (default): Data is stored as a `Map` with field names as keys
+  - `"vec"`: Data is stored as a `Vec` of values in field order
+  - `"single-value"`: Data is the value of a single field (must have exactly one data field)
+</ParamField>
+
+## Event Structure
+
+Events consist of:
+- **Fixed topics**: Static strings defined by the `topics` parameter or derived from the event name
+- **Dynamic topics**: Values from fields marked with `#[topic]`
+- **Data**: Values from fields not marked with `#[topic]`, formatted according to `data_format`
+
+## Field Attributes
+
+<ParamField path="#[topic]">
+  Mark a field as a topic. Topic fields are indexed and can be efficiently filtered by downstream systems.
+</ParamField>
+
+## Examples
+
+### Basic Event
+
+The event will have a single fixed topic matching the name of the struct in lower snake case. The fixed topic will appear before any topics listed as fields.
+
+```rust
+use soroban_sdk::contractevent;
+
+// Define the event using the `contractevent` attribute macro.
+#[contractevent]
+#[derive(Clone, Default, Debug, Eq, PartialEq)]
+pub struct MyEvent {
+    // Mark fields as topics, for the value to be included in the events topic list so
+    // that downstream systems know to index it.
+    #[topic]
+    pub my_topic: u32,
+    // Fields not marked as topics will appear in the events data section.
+    pub my_event_data: u32,
+    pub more_event_data: u64,
+}
+```
+
+This event will have:
+- Topics: `["my_event", <value of my_topic>]`
+- Data (as Map): `{my_event_data: <u32>, more_event_data: <u64>}`
+
+### Event with Custom Topics
+
+Define a contract event with a custom list of fixed topics.
+
+```rust
+use soroban_sdk::contractevent;
+
+// Define the event using the `contractevent` attribute macro.
+#[contractevent(topics = ["my_contract", "an_event"])]
+#[derive(Clone, Default, Debug, Eq, PartialEq)]
+pub struct MyEvent {
+    #[topic]
+    pub my_topic: u32,
+    pub my_event_data: u32,
+    pub more_event_data: u64,
+}
+```
+
+This event will have:
+- Topics: `["my_contract", "an_event", <value of my_topic>]`
+- Data (as Map): `{my_event_data: <u32>, more_event_data: <u64>}`
+
+### Event with Vec Data Format
+
+```rust
+use soroban_sdk::contractevent;
+
+#[contractevent(data_format = "vec")]
+#[derive(Clone, Default, Debug, Eq, PartialEq)]
+pub struct MyEvent {
+    #[topic]
+    pub my_topic: u32,
+    pub my_event_data: u32,
+    pub more_event_data: u64,
+}
+```
+
+This event will have:
+- Topics: `["my_event", <value of my_topic>]`
+- Data (as Vec): `[<my_event_data: u32>, <more_event_data: u64>]`
+
+### Event with Single Value Data Format
+
+When the data format is a single value there must be no more than one data field.
+
+```rust
+use soroban_sdk::contractevent;
+
+#[contractevent(data_format = "single-value")]
+#[derive(Clone, Default, Debug, Eq, PartialEq)]
+pub struct MyEvent {
+    #[topic]
+    pub my_topic: u32,
+    pub my_event_data: u32,
+}
+```
+
+This event will have:
+- Topics: `["my_event", <value of my_topic>]`
+- Data: `<my_event_data: u32>`
+
+### Full Example with Contract
+
+Defining an event, publishing it in a contract, and testing it.
+
+```rust
+use soroban_sdk::{
+    contract, contractevent, contractimpl, contracttype, 
+    symbol_short, Env, Symbol
+};
+
+// Define the event using the `contractevent` attribute macro.
+#[contractevent]
+#[derive(Clone, Default, Debug, Eq, PartialEq)]
+pub struct Increment {
+    #[topic]
+    pub change: u32,
+    pub count: u32,
+}
+
+#[contracttype]
+#[derive(Clone, Default, Debug, Eq, PartialEq)]
+pub struct State {
+    pub count: u32,
+}
+
+#[contract]
+pub struct Contract;
+
+#[contractimpl]
+impl Contract {
+    pub fn increment(env: Env, incr: u32) -> u32 {
+        let mut state = Self::get_state(env.clone());
+        state.count += incr;
+        env.storage().persistent().set(&symbol_short!("STATE"), &state);
+        
+        // Publish the event
+        env.events().publish((symbol_short!("COUNTER"),), Increment {
+            change: incr,
+            count: state.count,
+        });
+        
+        state.count
+    }
+
+    pub fn get_state(env: Env) -> State {
+        env.storage().persistent()
+            .get(&symbol_short!("STATE"))
+            .unwrap_or_default()
+    }
+}
+
+#[test]
+fn test() {
+    let env = Env::default();
+    let contract_id = env.register(Contract, ());
+    let client = ContractClient::new(&env, &contract_id);
+
+    assert_eq!(client.increment(&5), 5);
+    
+    // Verify the event was published
+    let events = env.events().all();
+    assert_eq!(events.len(), 1);
+}
+```
+
+## See Also
+
+- [`Env`](/api/types/env) - Access the events interface via env.events()
+- [`#[contracttype]`](/api/macros/contracttype) - Define general contract types
+- [Events Module](/api/modules/events) - Events API documentation

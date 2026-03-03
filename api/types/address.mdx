@@ -1,0 +1,283 @@
+---
+title: "Address"
+description: "Universal opaque identifier for contracts and accounts"
+---
+
+## Overview
+
+`Address` is a universal opaque identifier used in Soroban contracts. It can represent either a Stellar account or a contract.
+
+Address can be used as:
+- An input argument (e.g., to identify a payment recipient)
+- A data key (e.g., to store balances)
+- An authentication & authorization source
+
+Internally, Address may represent:
+- A Stellar account (using Ed25519 public key)
+- A contract (identified by contract hash)
+
+## Creating Addresses
+
+### `from_str()`
+
+Creates an `Address` from a Stellar strkey.
+
+```rust
+pub fn from_str(env: &Env, strkey: &str) -> Address
+```
+
+Supported strkey types:
+- Account keys: `G...` (Ed25519 public keys)
+- Contract keys: `C...` (Contract identifiers)
+
+**Example:**
+```rust
+let address = Address::from_str(
+    &env,
+    "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF"
+);
+```
+
+### `from_string()`
+
+Creates an `Address` from a `String` containing a Stellar strkey.
+
+```rust
+pub fn from_string(strkey: &String) -> Self
+```
+
+**Example:**
+```rust
+let strkey = String::from_str(&env, "GAAA...");
+let address = Address::from_string(&strkey);
+```
+
+### `from_string_bytes()`
+
+Creates an `Address` from bytes containing a Stellar strkey.
+
+```rust
+pub fn from_string_bytes(strkey: &Bytes) -> Self
+```
+
+### `generate()` (Test Only)
+
+Generates a random `Address` for testing.
+
+```rust
+let address = Address::generate(&env);
+```
+
+## Authorization
+
+### `require_auth()`
+
+Ensures that this Address has authorized the invocation of the current contract with all invocation arguments.
+
+```rust
+pub fn require_auth(&self)
+```
+
+During on-chain execution, the Soroban host performs authentication (verifies signatures) and ensures replay prevention.
+
+**Panics:**
+If the invocation is not authorized.
+
+**Example:**
+```rust
+pub fn transfer(env: Env, from: Address, to: Address, amount: i128) {
+    from.require_auth();
+    // Transfer logic...
+}
+```
+
+### `require_auth_for_args()`
+
+Ensures that this Address has authorized the invocation with specific arguments.
+
+```rust
+pub fn require_auth_for_args(&self, args: Vec<Val>)
+```
+
+The arguments don't have to match the contract invocation arguments. However, it's best practice to have a well-defined, deterministic mapping between invocation arguments and `require_auth` arguments.
+
+**Panics:**
+If the invocation is not authorized.
+
+**Example:**
+```rust
+pub fn approve(env: Env, from: Address, spender: Address, amount: i128) {
+    from.require_auth_for_args((spender.clone(), amount).into_val(&env));
+    // Approval logic...
+}
+```
+
+## Conversion Methods
+
+### `to_string()`
+
+Converts this `Address` into the corresponding Stellar strkey.
+
+```rust
+pub fn to_string(&self) -> String
+```
+
+**Example:**
+```rust
+let strkey = address.to_string();
+```
+
+### `to_payload()`
+
+Extracts the payload from the address.
+
+```rust
+pub fn to_payload(&self) -> Option<AddressPayload>
+```
+
+**Returns:**
+- For contract addresses (`C...`): `AddressPayload::ContractIdHash` containing the 32-byte contract hash
+- For account addresses (`G...`): `AddressPayload::AccountIdPublicKeyEd25519` containing the 32-byte Ed25519 public key
+- `None` if the address type is not recognized
+
+<Warning>
+  For account addresses, the returned Ed25519 public key corresponds to the account's master key, which may not be a signer of the account depending on the account's configuration. Do not use this for custom Ed25519 signature verification as a form of authentication.
+</Warning>
+
+### `from_payload()`
+
+Constructs an `Address` from an `AddressPayload`.
+
+```rust
+pub fn from_payload(env: &Env, payload: AddressPayload) -> Address
+```
+
+This is the inverse of `to_payload()`.
+
+## Query Methods
+
+### `executable()`
+
+Returns the executable type of this address, if any.
+
+```rust
+pub fn executable(&self) -> Option<Executable>
+```
+
+For Wasm contracts, this returns the hash of the contract code. For built-in contracts, this returns the executable type (StellarAsset or Account).
+
+**Returns:**
+- `None` when the contract or account does not exist
+- `Some(Executable::Wasm(BytesN<32>))` for Wasm contracts
+- `Some(Executable::StellarAsset)` for Stellar Asset contracts
+- `Some(Executable::Account)` for account contracts
+
+**Example:**
+```rust
+match address.executable() {
+    Some(Executable::Wasm(hash)) => {
+        // Contract exists and uses Wasm
+    }
+    Some(Executable::StellarAsset) => {
+        // Built-in Stellar Asset contract
+    }
+    None => {
+        // Contract does not exist
+    }
+}
+```
+
+### `exists()`
+
+Returns whether this address exists in the ledger.
+
+```rust
+pub fn exists(&self) -> bool
+```
+
+For contract addresses, this means there is a corresponding contract instance deployed. For account addresses, this means the account entry exists in the ledger.
+
+**Example:**
+```rust
+if !address.exists() {
+    panic!("Address does not exist");
+}
+```
+
+## Internal Methods
+
+### `env()`
+
+Returns a reference to the `Env`.
+
+```rust
+pub fn env(&self) -> &Env
+```
+
+### `as_val()` / `to_val()`
+
+Convert to/from `Val` representation.
+
+```rust
+pub fn as_val(&self) -> &Val
+pub fn to_val(&self) -> Val
+```
+
+### `as_object()` / `to_object()`
+
+Convert to/from `AddressObject` representation.
+
+```rust
+pub fn as_object(&self) -> &AddressObject
+pub fn to_object(&self) -> AddressObject
+```
+
+## Traits
+
+`Address` implements the following traits:
+- `Clone`
+- `Debug`
+- `Eq`, `PartialEq`
+- `Ord`, `PartialOrd`
+
+## Examples
+
+### Basic Usage
+
+```rust
+use soroban_sdk::{contract, contractimpl, Address, Env};
+
+#[contract]
+pub struct TokenContract;
+
+#[contractimpl]
+impl TokenContract {
+    pub fn transfer(env: Env, from: Address, to: Address, amount: i128) {
+        from.require_auth();
+        
+        let from_balance = get_balance(&env, &from);
+        let to_balance = get_balance(&env, &to);
+        
+        set_balance(&env, &from, from_balance - amount);
+        set_balance(&env, &to, to_balance + amount);
+    }
+}
+```
+
+### Testing with Generated Addresses
+
+```rust
+#[test]
+fn test_transfer() {
+    let env = Env::default();
+    let contract_id = env.register(TokenContract, ());
+    let client = TokenContractClient::new(&env, &contract_id);
+    
+    env.mock_all_auths();
+    
+    let user1 = Address::generate(&env);
+    let user2 = Address::generate(&env);
+    
+    client.transfer(&user1, &user2, &1000);
+}
+```

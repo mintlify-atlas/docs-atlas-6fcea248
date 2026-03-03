@@ -1,0 +1,388 @@
+---
+title: "Deploying Contracts"
+description: "Deploy your Soroban smart contracts to the network"
+---
+
+Once you've written and tested your smart contract, the next step is to deploy it to a Soroban network. This guide covers the deployment process from building to production deployment.
+
+## Prerequisites
+
+Before deploying, ensure you have:
+- A working Soroban contract
+- Soroban CLI installed
+- A funded account on the target network
+- Your contract compiled to WebAssembly
+
+## Building for Production
+
+<Steps>
+  <Step title="Configure release profile">
+    Optimize your `Cargo.toml` for production builds:
+
+    ```toml Cargo.toml
+    [profile.release]
+    opt-level = "z"          # Optimize for size
+    overflow-checks = true   # Keep overflow checks
+    debug = 0               # No debug info
+    strip = "symbols"       # Strip symbols
+    debug-assertions = false
+    panic = "abort"         # Smaller panic handler
+    codegen-units = 1       # Better optimization
+    lto = true              # Link-time optimization
+    ```
+
+    <Note>
+      These settings significantly reduce your contract's WebAssembly size, which lowers deployment costs.
+    </Note>
+  </Step>
+
+  <Step title="Build the contract">
+    Build your contract with the release profile:
+
+    ```bash
+    cargo build --target wasm32-unknown-unknown --release
+    ```
+
+    The compiled WebAssembly file will be located at:
+    ```
+    target/wasm32-unknown-unknown/release/your_contract.wasm
+    ```
+  </Step>
+
+  <Step title="Optimize the WASM (optional)">
+    Further optimize the WebAssembly using `soroban-cli`:
+
+    ```bash
+    soroban contract optimize \
+      --wasm target/wasm32-unknown-unknown/release/your_contract.wasm
+    ```
+
+    This creates an optimized WASM file that's typically smaller.
+  </Step>
+</Steps>
+
+## Deployment Process
+
+### 1. Install Soroban CLI
+
+If you haven't already:
+
+```bash
+cargo install soroban-cli
+```
+
+Verify installation:
+
+```bash
+soroban --version
+```
+
+### 2. Configure Network
+
+Add the network you want to deploy to:
+
+<CodeGroup>
+
+```bash Testnet
+soroban network add testnet \
+  --rpc-url https://soroban-testnet.stellar.org:443 \
+  --network-passphrase "Test SDF Network ; September 2015"
+```
+
+```bash Futurenet
+soroban network add futurenet \
+  --rpc-url https://rpc-futurenet.stellar.org:443 \
+  --network-passphrase "Test SDF Future Network ; October 2022"
+```
+
+```bash Mainnet
+soroban network add mainnet \
+  --rpc-url https://soroban-mainnet.stellar.org:443 \
+  --network-passphrase "Public Global Stellar Network ; September 2015"
+```
+
+</CodeGroup>
+
+### 3. Configure Identity
+
+Create or import an identity:
+
+```bash
+# Generate a new identity
+soroban keys generate deployer --network testnet
+
+# Or import an existing secret key
+soroban keys add deployer --secret-key
+```
+
+<Warning>
+  Keep your secret keys secure. Never commit them to version control or share them publicly.
+</Warning>
+
+### 4. Fund Your Account
+
+For testnet/futurenet, use the friendbot to fund your account:
+
+```bash
+soroban keys fund deployer --network testnet
+```
+
+For mainnet, you'll need to fund your account with XLM through normal Stellar channels.
+
+### 5. Deploy the Contract
+
+Deploy your contract to the network:
+
+```bash
+soroban contract deploy \
+  --wasm target/wasm32-unknown-unknown/release/your_contract.wasm \
+  --source deployer \
+  --network testnet
+```
+
+This will output your contract's address:
+```
+CA3D5KRYM6CB7OWQ6TWYRR3Z4T7GNZLKERYNZGGA5SOAOPIFY6YQGAXE
+```
+
+<Note>
+  Save this contract address - you'll need it to invoke your contract.
+</Note>
+
+## Deploying with Constructor
+
+If your contract has a constructor, you need to deploy and initialize in two steps:
+
+<Steps>
+  <Step title="Deploy the contract">
+    ```bash
+    CONTRACT_ID=$(soroban contract deploy \
+      --wasm target/wasm32-unknown-unknown/release/your_contract.wasm \
+      --source deployer \
+      --network testnet)
+    ```
+  </Step>
+
+  <Step title="Initialize the contract">
+    ```bash
+    soroban contract invoke \
+      --id $CONTRACT_ID \
+      --source deployer \
+      --network testnet \
+      -- \
+      __constructor \
+      --init_key 100 \
+      --init_value 1000
+    ```
+  </Step>
+</Steps>
+
+Or deploy with automatic constructor invocation:
+
+```bash
+soroban contract deploy \
+  --wasm target/wasm32-unknown-unknown/release/your_contract.wasm \
+  --source deployer \
+  --network testnet \
+  -- \
+  --init_key 100 \
+  --init_value 1000
+```
+
+## Invoking Your Contract
+
+Once deployed, invoke contract functions:
+
+```bash
+soroban contract invoke \
+  --id CA3D5KRYM6CB7OWQ6TWYRR3Z4T7GNZLKERYNZGGA5SOAOPIFY6YQGAXE \
+  --source deployer \
+  --network testnet \
+  -- \
+  add \
+  --a 5 \
+  --b 7
+```
+
+## Contract Installation vs Deployment
+
+Soroban has a two-step process that can save costs:
+
+### Install Contract Code
+
+Upload the WASM code once:
+
+```bash
+CODE_HASH=$(soroban contract install \
+  --wasm target/wasm32-unknown-unknown/release/your_contract.wasm \
+  --source deployer \
+  --network testnet)
+
+echo $CODE_HASH
+```
+
+### Deploy Contract Instances
+
+Create multiple instances from the same code:
+
+```bash
+# Deploy first instance
+CONTRACT_1=$(soroban contract deploy \
+  --wasm-hash $CODE_HASH \
+  --source deployer \
+  --network testnet)
+
+# Deploy second instance (cheaper, reuses code)
+CONTRACT_2=$(soroban contract deploy \
+  --wasm-hash $CODE_HASH \
+  --source deployer \
+  --network testnet)
+```
+
+<Note>
+  Installing contract code separately is more efficient when you need to deploy multiple instances of the same contract.
+</Note>
+
+## Programmatic Deployment
+
+Deploy contracts programmatically using the SDK's deployer:
+
+```rust
+use soroban_sdk::{contract, contractimpl, Env, Address, BytesN};
+
+#[contractimpl]
+impl Contract {
+    pub fn deploy_child(
+        env: Env,
+        wasm_hash: BytesN<32>,
+        salt: BytesN<32>,
+    ) -> Address {
+        // Deploy a new contract instance
+        env.deployer()
+            .with_current_contract(salt)
+            .deploy(wasm_hash)
+    }
+}
+```
+
+## Managing Contract Storage
+
+### Extend TTL
+
+Contract storage has a time-to-live (TTL). Extend it to prevent expiration:
+
+```bash
+# Extend instance TTL
+soroban contract extend \
+  --id $CONTRACT_ID \
+  --ledgers-to-extend 100000 \
+  --durability persistent \
+  --source deployer \
+  --network testnet
+```
+
+### Restore Expired Data
+
+Restore expired contract data:
+
+```bash
+soroban contract restore \
+  --id $CONTRACT_ID \
+  --source deployer \
+  --network testnet
+```
+
+## Upgrading Contracts
+
+Contracts can be made upgradeable by implementing update functionality:
+
+```rust
+use soroban_sdk::{contract, contractimpl, Env, BytesN};
+
+#[contractimpl]
+impl Contract {
+    pub fn upgrade(env: Env, new_wasm_hash: BytesN<32>) {
+        // Check authorization
+        // ...
+        
+        // Update contract code
+        env.deployer().update_current_contract_wasm(new_wasm_hash);
+    }
+}
+```
+
+Then upgrade by invoking the upgrade function:
+
+```bash
+# Install new version
+NEW_HASH=$(soroban contract install \
+  --wasm target/wasm32-unknown-unknown/release/your_contract_v2.wasm \
+  --source deployer \
+  --network testnet)
+
+# Invoke upgrade function
+soroban contract invoke \
+  --id $CONTRACT_ID \
+  --source deployer \
+  --network testnet \
+  -- \
+  upgrade \
+  --new_wasm_hash $NEW_HASH
+```
+
+<Warning>
+  Make contracts upgradeable carefully. Include proper authorization checks to prevent unauthorized upgrades.
+</Warning>
+
+## Deployment Checklist
+
+Before deploying to production:
+
+- [ ] All tests pass
+- [ ] Contract is optimized for size
+- [ ] Security review completed
+- [ ] Storage TTLs configured appropriately
+- [ ] Error handling is comprehensive
+- [ ] Events are properly emitted
+- [ ] Authorization checks are in place
+- [ ] Gas/resource costs are acceptable
+- [ ] Upgrade mechanism (if needed) is implemented
+- [ ] Documentation is up to date
+
+## Monitoring Deployed Contracts
+
+After deployment, monitor your contract:
+
+```bash
+# Get contract info
+soroban contract info \
+  --id $CONTRACT_ID \
+  --network testnet
+
+# View contract storage
+soroban contract fetch \
+  --id $CONTRACT_ID \
+  --network testnet
+```
+
+## Cost Considerations
+
+- **Code Size**: Smaller WASM files cost less to deploy
+- **Storage**: Persistent storage has ongoing costs
+- **TTL**: Longer TTLs cost more upfront
+- **Invocations**: Each function call consumes resources
+
+<Tip>
+  Use the testutils budget tracking during testing to estimate resource costs before deploying.
+</Tip>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Testing" icon="flask" href="/guides/testing">
+    Write comprehensive tests before deployment
+  </Card>
+  <Card title="Events" icon="broadcast-tower" href="/guides/events">
+    Monitor contracts with events
+  </Card>
+</CardGroup>

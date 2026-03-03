@@ -1,0 +1,238 @@
+---
+title: "Contract Macros and Structure"
+description: "Learn how to define and implement Soroban smart contracts using #[contract] and #[contractimpl] macros"
+---
+
+## Overview
+
+Soroban contracts are defined using procedural macros that generate the necessary code to export contract functions and integrate with the Soroban environment. The core macros are `#[contract]` and `#[contractimpl]`.
+
+## Contract Definition
+
+### The `#[contract]` Macro
+
+The `#[contract]` macro marks a type as a contract. This type will have its implementation functions exported as contract functions.
+
+```rust
+use soroban_sdk::{contract, contractimpl, Env};
+
+#[contract]
+pub struct HelloContract;
+```
+
+<Note>
+A crate can have multiple types marked with `#[contract]`, but when compiled to WASM and deployed, they are treated as a single contract with all their combined functions.
+</Note>
+
+### The `#[contractimpl]` Macro
+
+The `#[contractimpl]` macro exports the public functions in an impl block as contract functions that can be invoked.
+
+```rust
+#[contractimpl]
+impl HelloContract {
+    pub fn hello(env: Env, to: Symbol) -> Vec<Symbol> {
+        vec![&env, symbol_short!("Hello"), to]
+    }
+}
+```
+
+**Key Points:**
+- Only `pub` functions are exported and callable
+- Private functions remain internal implementation details
+- The first parameter can be `Env` or `&Env` for environment access
+
+## Complete Contract Example
+
+Here's a complete contract with state management:
+
+```rust
+use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Env, Symbol};
+
+#[contracttype]
+#[derive(Clone, Default, Debug, Eq, PartialEq)]
+pub struct State {
+    pub count: u32,
+    pub last_incr: u32,
+}
+
+#[contract]
+pub struct Contract;
+
+#[contractimpl]
+impl Contract {
+    /// Increment increments an internal counter, and returns the value.
+    pub fn increment(env: Env, incr: u32) -> u32 {
+        // Get the current count.
+        let mut state = Self::get_state(env.clone());
+
+        // Increment the count.
+        state.count += incr;
+        state.last_incr = incr;
+
+        // Save the count.
+        env.storage().persistent().set(&symbol_short!("STATE"), &state);
+
+        // Return the count to the caller.
+        state.count
+    }
+
+    /// Return the current state.
+    pub fn get_state(env: Env) -> State {
+        env.storage().persistent()
+            .get(&symbol_short!("STATE"))
+            .unwrap_or_else(|| State::default())
+    }
+}
+```
+
+## Constructor Support
+
+Contracts can define a constructor that runs when the contract is deployed:
+
+```rust
+#[contractimpl]
+impl Contract {
+    pub fn __constructor(env: Env, admin: Address, initial_value: u32) {
+        env.storage().instance().set(&symbol_short!("ADMIN"), &admin);
+        env.storage().instance().set(&symbol_short!("VALUE"), &initial_value);
+    }
+}
+```
+
+<Warning>
+The constructor function must be named `__constructor` (with double underscores). It runs exactly once during contract deployment.
+</Warning>
+
+## Contract Traits
+
+### Defining Contract Interfaces
+
+Use `#[contracttrait]` to define interfaces with default implementations:
+
+```rust
+use soroban_sdk::{contracttrait, Address, Env};
+
+#[contracttrait]
+pub trait Token {
+    fn balance(env: &Env, id: Address) -> i128;
+    
+    // Default function that can be optionally overridden
+    fn transfer(env: &Env, from: Address, to: Address, amount: i128) {
+        // Default implementation
+    }
+}
+```
+
+### Implementing Traits
+
+```rust
+#[contract]
+pub struct TokenContract;
+
+#[contractimpl(contracttrait)]
+impl Token for TokenContract {
+    fn balance(env: &Env, id: Address) -> i128 {
+        // Custom implementation
+        todo!()
+    }
+    // transfer() uses the default implementation
+}
+```
+
+## Error Handling
+
+Define custom error types using `#[contracterror]`:
+
+```rust
+use soroban_sdk::contracterror;
+
+#[contracterror]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[repr(u32)]
+pub enum Error {
+    InsufficientBalance = 1,
+    Unauthorized = 2,
+}
+
+#[contractimpl]
+impl Contract {
+    pub fn transfer(env: Env, amount: i128) -> Result<(), Error> {
+        if amount < 0 {
+            return Err(Error::InsufficientBalance);
+        }
+        Ok(())
+    }
+}
+```
+
+## Testing Contracts
+
+Contracts can be tested using the generated client:
+
+```rust
+#[test]
+fn test() {
+    let env = Env::default();
+    let contract_id = env.register(Contract, ());
+    let client = ContractClient::new(&env, &contract_id);
+
+    assert_eq!(client.increment(&1), 1);
+    assert_eq!(client.increment(&10), 11);
+    assert_eq!(
+        client.get_state(),
+        State {
+            count: 11,
+            last_incr: 10,
+        },
+    );
+}
+```
+
+## Related Macros
+
+<CardGroup cols={2}>
+  <Card title="contracttype" icon="code">
+    Define custom types that can be stored and passed between contracts
+  </Card>
+  <Card title="contractimport" icon="download">
+    Import external contracts from WASM files
+  </Card>
+  <Card title="contractclient" icon="plug">
+    Generate clients for contract trait interfaces
+  </Card>
+  <Card title="contractmeta" icon="tag">
+    Add metadata to contracts
+  </Card>
+</CardGroup>
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Keep contracts focused">
+    Each contract should have a single, well-defined purpose. Use multiple contracts for complex applications.
+  </Accordion>
+  
+  <Accordion title="Use descriptive function names">
+    Contract function names should clearly indicate what they do since they become part of the contract's public API.
+  </Accordion>
+  
+  <Accordion title="Document public functions">
+    Add doc comments to public contract functions - they become part of the contract spec that clients use.
+  </Accordion>
+  
+  <Accordion title="Validate inputs early">
+    Perform input validation at the beginning of functions to fail fast and save resources.
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Environment" href="/core/environment" icon="layer-group">
+    Learn about the Env type and environment functions
+  </Card>
+  <Card title="Storage" href="/core/storage" icon="database">
+    Understand how to persist contract data
+  </Card>
+</CardGroup>

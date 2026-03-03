@@ -1,122 +1,135 @@
 {
   "$schema": "https://mintlify.com/docs.json",
-  "theme": "mint",
-  "name": "Mint Starter Kit",
+  "name": "Soroban Rust SDK",
+  "theme": "aspen",
   "colors": {
-    "primary": "#16A34A",
-    "light": "#07C983",
-    "dark": "#15803D"
+    "primary": "#7B16FF",
+    "light": "#9D4EFF",
+    "dark": "#5A00CC"
   },
-  "favicon": "/favicon.svg",
+  "navbar": {
+    "primary": {
+      "type": "github",
+      "href": "https://github.com/stellar/rs-soroban-sdk"
+    }
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/stellar/rs-soroban-sdk"
+    }
+  },
   "navigation": {
     "tabs": [
       {
-        "tab": "Guides",
+        "tab": "Documentation",
         "groups": [
           {
-            "group": "Getting started",
+            "group": "Getting Started",
             "pages": [
-              "index",
-              "quickstart",
-              "development"
+              "introduction",
+              "installation",
+              "quickstart"
             ]
           },
           {
-            "group": "Customization",
+            "group": "Core Concepts",
             "pages": [
-              "essentials/settings",
-              "essentials/navigation"
+              "core/contracts",
+              "core/environment",
+              "core/types",
+              "core/storage",
+              "core/authentication"
             ]
           },
           {
-            "group": "Writing content",
+            "group": "Guides",
             "pages": [
-              "essentials/markdown",
-              "essentials/code",
-              "essentials/images",
-              "essentials/reusable-snippets"
+              "guides/writing-contracts",
+              "guides/testing",
+              "guides/deploying",
+              "guides/events",
+              "guides/custom-types",
+              "guides/error-handling"
             ]
           },
           {
-            "group": "AI tools",
+            "group": "Advanced Topics",
             "pages": [
-              "ai-tools/cursor",
-              "ai-tools/claude-code",
-              "ai-tools/windsurf"
+              "advanced/cryptography",
+              "advanced/cross-contract-calls",
+              "advanced/token-interface",
+              "advanced/optimization"
             ]
           }
         ]
       },
       {
-        "tab": "API reference",
+        "tab": "API Reference",
         "groups": [
           {
-            "group": "API documentation",
+            "group": "Macros",
             "pages": [
-              "api-reference/introduction"
+              "api/macros/contract",
+              "api/macros/contractimpl",
+              "api/macros/contracttype",
+              "api/macros/contracterror",
+              "api/macros/contractevent",
+              "api/macros/contractimport",
+              "api/macros/symbol-short"
             ]
           },
           {
-            "group": "Endpoint examples",
+            "group": "Core Types",
             "pages": [
-              "api-reference/endpoint/get",
-              "api-reference/endpoint/create",
-              "api-reference/endpoint/delete",
-              "api-reference/endpoint/webhook"
+              "api/types/env",
+              "api/types/address",
+              "api/types/symbol",
+              "api/types/bytes",
+              "api/types/string"
+            ]
+          },
+          {
+            "group": "Collections",
+            "pages": [
+              "api/collections/vec",
+              "api/collections/map"
+            ]
+          },
+          {
+            "group": "Storage",
+            "pages": [
+              "api/storage/overview",
+              "api/storage/persistent",
+              "api/storage/temporary",
+              "api/storage/instance"
+            ]
+          },
+          {
+            "group": "Modules",
+            "pages": [
+              "api/modules/auth",
+              "api/modules/crypto",
+              "api/modules/deploy",
+              "api/modules/events",
+              "api/modules/ledger",
+              "api/modules/token",
+              "api/modules/testutils"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Migration",
+        "groups": [
+          {
+            "group": "Version Upgrades",
+            "pages": [
+              "migration/overview",
+              "migration/breaking-changes"
             ]
           }
         ]
       }
-    ],
-    "global": {
-      "anchors": [
-        {
-          "anchor": "Documentation",
-          "href": "https://mintlify.com/docs",
-          "icon": "book-open-cover"
-        },
-        {
-          "anchor": "Blog",
-          "href": "https://mintlify.com/blog",
-          "icon": "newspaper"
-        }
-      ]
-    }
-  },
-  "logo": {
-    "light": "/logo/light.svg",
-    "dark": "/logo/dark.svg"
-  },
-  "navbar": {
-    "links": [
-      {
-        "label": "Support",
-        "href": "mailto:hi@mintlify.com"
-      }
-    ],
-    "primary": {
-      "type": "button",
-      "label": "Dashboard",
-      "href": "https://dashboard.mintlify.com"
-    }
-  },
-  "contextual": {
-    "options": [
-     "copy",
-     "view",
-     "chatgpt",
-     "claude",
-     "perplexity",
-     "mcp",
-     "cursor",
-     "vscode"
-   ]
-  },
-  "footer": {
-    "socials": {
-      "x": "https://x.com/mintlify",
-      "github": "https://github.com/mintlify",
-      "linkedin": "https://linkedin.com/company/mintlify"
-    }
+    ]
   }
 }

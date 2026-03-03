@@ -1,0 +1,348 @@
+---
+title: "ledger"
+description: "Access ledger information and network metadata"
+---
+
+The `ledger` module provides types for retrieving information about the current ledger, including sequence numbers, timestamps, and network identifiers.
+
+## Overview
+
+Access ledger information through `env.ledger()` in your contracts. The ledger provides metadata about the blockchain state at the time of execution.
+
+## Types
+
+### Ledger
+
+Retrieves information about the current ledger.
+
+```rust
+pub struct Ledger(Env);
+```
+
+Obtain via `env.ledger()` in contract code.
+
+## Functions
+
+### sequence
+
+Returns the sequence number of the current ledger.
+
+```rust
+pub fn sequence(&self) -> u32
+```
+
+The sequence number is a unique, sequential number that increments by one for each new ledger.
+
+**Example:**
+```rust
+use soroban_sdk::{contract, contractimpl, Env};
+
+#[contract]
+pub struct Contract;
+
+#[contractimpl]
+impl Contract {
+    pub fn get_ledger_sequence(env: Env) -> u32 {
+        env.ledger().sequence()
+    }
+}
+```
+
+### timestamp
+
+Returns the Unix timestamp when the ledger was closed.
+
+```rust
+pub fn timestamp(&self) -> u64
+```
+
+The timestamp is the number of seconds (excluding leap seconds) elapsed since Unix epoch (January 1st, 1970, 00:00:00 UTC).
+
+**Example:**
+```rust
+use soroban_sdk::{contract, contractimpl, Env};
+
+#[contract]
+pub struct Contract;
+
+#[contractimpl]
+impl Contract {
+    pub fn check_deadline(env: Env, deadline: u64) -> bool {
+        let current_time = env.ledger().timestamp();
+        current_time <= deadline
+    }
+}
+```
+
+### network_id
+
+Returns the network identifier.
+
+```rust
+pub fn network_id(&self) -> BytesN<32>
+```
+
+The network ID is the SHA-256 hash of the network passphrase:
+- **Public Network**: `SHA256("Public Global Stellar Network ; September 2015")`
+- **Test Network**: `SHA256("Test SDF Network ; September 2015")`
+
+**Example:**
+```rust
+use soroban_sdk::{contract, contractimpl, BytesN, Env};
+
+#[contract]
+pub struct Contract;
+
+#[contractimpl]
+impl Contract {
+    pub fn get_network_id(env: Env) -> BytesN<32> {
+        env.ledger().network_id()
+    }
+}
+```
+
+### protocol_version (deprecated)
+
+Returns the protocol version of the ledger.
+
+```rust
+#[deprecated(note = "Protocol version won't be available in the future")]
+pub fn protocol_version(&self) -> u32
+```
+
+**Note:** This function is deprecated and will be removed in future versions.
+
+### max_live_until_ledger (hidden)
+
+Returns the maximum ledger sequence number that data can live until.
+
+```rust
+#[doc(hidden)]
+pub fn max_live_until_ledger(&self) -> u32
+```
+
+## Examples
+
+### Time-based Logic
+
+```rust
+use soroban_sdk::{contract, contractimpl, Env, Address};
+
+#[contract]
+pub struct Escrow;
+
+#[contractimpl]
+impl Escrow {
+    pub fn release(
+        env: Env,
+        release_time: u64,
+        recipient: Address
+    ) -> Result<(), &'static str> {
+        let current_time = env.ledger().timestamp();
+        
+        if current_time < release_time {
+            return Err("Release time not reached");
+        }
+        
+        // Release funds to recipient
+        Ok(())
+    }
+}
+```
+
+### Sequence-based Logic
+
+```rust
+use soroban_sdk::{contract, contractimpl, Env};
+
+#[contract]
+pub struct Auction;
+
+#[contractimpl]
+impl Auction {
+    pub fn end_auction(
+        env: Env,
+        end_sequence: u32
+    ) -> Result<(), &'static str> {
+        let current_sequence = env.ledger().sequence();
+        
+        if current_sequence < end_sequence {
+            return Err("Auction still ongoing");
+        }
+        
+        // Finalize auction
+        Ok(())
+    }
+}
+```
+
+### Network Detection
+
+```rust
+use soroban_sdk::{contract, contractimpl, BytesN, Env};
+
+#[contract]
+pub struct Contract;
+
+#[contractimpl]
+impl Contract {
+    pub fn is_mainnet(env: Env) -> bool {
+        // Check if running on mainnet by comparing network ID
+        let network_id = env.ledger().network_id();
+        // Compare with known mainnet network ID
+        // (This is an example - actual implementation would need the real hash)
+        network_id == BytesN::from_array(&env, &[/* mainnet hash */])
+    }
+}
+```
+
+## Test Utilities
+
+When the `testutils` feature is enabled, additional functions are available for controlling ledger state in tests:
+
+### set
+
+Sets complete ledger info.
+
+```rust
+pub fn set(&self, ledger_info: LedgerInfo)
+```
+
+### set_sequence_number
+
+Sets the ledger sequence number.
+
+```rust
+pub fn set_sequence_number(&self, sequence_number: u32)
+```
+
+### set_timestamp
+
+Sets the ledger timestamp.
+
+```rust
+pub fn set_timestamp(&self, timestamp: u64)
+```
+
+### set_network_id
+
+Sets the network ID.
+
+```rust
+pub fn set_network_id(&self, network_id: [u8; 32])
+```
+
+### set_protocol_version
+
+Sets the protocol version.
+
+```rust
+pub fn set_protocol_version(&self, protocol_version: u32)
+```
+
+### set_base_reserve
+
+Sets the base reserve.
+
+```rust
+pub fn set_base_reserve(&self, base_reserve: u32)
+```
+
+### set_min_temp_entry_ttl
+
+Sets the minimum temporary entry TTL.
+
+```rust
+pub fn set_min_temp_entry_ttl(&self, min_temp_entry_ttl: u32)
+```
+
+### set_min_persistent_entry_ttl
+
+Sets the minimum persistent entry TTL.
+
+```rust
+pub fn set_min_persistent_entry_ttl(&self, min_persistent_entry_ttl: u32)
+```
+
+### set_max_entry_ttl
+
+Sets the maximum entry TTL.
+
+```rust
+pub fn set_max_entry_ttl(&self, max_entry_ttl: u32)
+```
+
+### get
+
+Gets the current ledger info.
+
+```rust
+pub fn get(&self) -> LedgerInfo
+```
+
+### with_mut
+
+Modifies ledger info using a closure.
+
+```rust
+pub fn with_mut<F>(&self, f: F)
+where
+    F: FnMut(&mut LedgerInfo)
+```
+
+### Test Example
+
+```rust
+use soroban_sdk::{Env, testutils::Ledger};
+
+#[test]
+fn test_time_based_function() {
+    let env = Env::default();
+    
+    // Set ledger timestamp to a specific value
+    env.ledger().set_timestamp(1234567890);
+    
+    let contract_id = env.register(Contract, ());
+    let client = ContractClient::new(&env, &contract_id);
+    
+    // Test with specific timestamp
+    let result = client.check_deadline(&2000000000);
+    assert!(result);
+    
+    // Advance time
+    env.ledger().set_timestamp(3000000000);
+    let result = client.check_deadline(&2000000000);
+    assert!(!result);
+}
+```
+
+## LedgerInfo
+
+Complete ledger information structure (available with `testutils`):
+
+```rust
+pub struct LedgerInfo {
+    pub protocol_version: u32,
+    pub sequence_number: u32,
+    pub timestamp: u64,
+    pub network_id: [u8; 32],
+    pub base_reserve: u32,
+    pub min_temp_entry_ttl: u32,
+    pub min_persistent_entry_ttl: u32,
+    pub max_entry_ttl: u32,
+}
+```
+
+## Best Practices
+
+1. **Use timestamps for real-world time**: Use `timestamp()` when working with real-world deadlines
+2. **Use sequence for block-based logic**: Use `sequence()` for logic tied to blockchain progression
+3. **Cache ledger values**: If using multiple times, cache the value to save computation
+4. **Test time-based logic**: Use testutils to thoroughly test time-dependent behavior
+5. **Handle time drift**: Remember that timestamps may not be perfectly accurate
+
+## See Also
+
+- [Env](/api/types/env) - For accessing ledger functions
+- [Bytes](/api/types/bytes) - For byte arrays and fixed-size BytesN
+- [Ledger Headers](https://developers.stellar.org/docs/learn/encyclopedia/network-configuration/ledger-headers) - Stellar documentation on ledger headers

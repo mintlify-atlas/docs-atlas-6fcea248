@@ -1,0 +1,292 @@
+---
+title: "Writing Smart Contracts"
+description: "Step-by-step guide to writing Soroban smart contracts with the Rust SDK"
+---
+
+This guide walks you through the fundamentals of writing smart contracts on Soroban using the Rust SDK.
+
+## Prerequisites
+
+Before you begin, ensure you have:
+- Rust toolchain installed
+- Basic understanding of Rust programming
+- Soroban SDK added to your `Cargo.toml`
+
+## Basic Contract Structure
+
+Every Soroban contract follows a standard structure using three key macros:
+
+<Steps>
+  <Step title="Define the contract struct">
+    Use the `#[contract]` macro to mark your contract struct:
+
+    ```rust
+    use soroban_sdk::{contract, contractimpl};
+
+    #[contract]
+    pub struct Contract;
+    ```
+
+    <Note>
+      The contract struct doesn't need any fields. It serves as a namespace for your contract functions.
+    </Note>
+  </Step>
+
+  <Step title="Implement contract functions">
+    Use the `#[contractimpl]` macro to implement your contract's public functions:
+
+    ```rust
+    #[contractimpl]
+    impl Contract {
+        pub fn add(a: u64, b: u64) -> u64 {
+            a + b
+        }
+    }
+    ```
+
+    All `pub` functions in a `#[contractimpl]` block become part of your contract's public interface.
+  </Step>
+
+  <Step title="Add the no_std attribute">
+    Soroban contracts must be `no_std` to compile to WebAssembly:
+
+    ```rust
+    #![no_std]
+    use soroban_sdk::{contract, contractimpl};
+
+    #[contract]
+    pub struct Contract;
+
+    #[contractimpl]
+    impl Contract {
+        pub fn add(a: u64, b: u64) -> u64 {
+            a + b
+        }
+    }
+    ```
+  </Step>
+</Steps>
+
+## Working with Storage
+
+Soroban provides three types of storage, each with different persistence characteristics:
+
+### Persistent Storage
+
+For data that needs to persist long-term:
+
+```rust
+use soroban_sdk::{contract, contractimpl, Env, Symbol};
+
+#[contractimpl]
+impl Contract {
+    pub fn put(env: Env, key: Symbol, val: Symbol) {
+        env.storage().persistent().set(&key, &val)
+    }
+
+    pub fn get(env: Env, key: Symbol) -> Option<Symbol> {
+        env.storage().persistent().get(&key)
+    }
+
+    pub fn del(env: Env, key: Symbol) {
+        env.storage().persistent().remove(&key)
+    }
+}
+```
+
+### Temporary Storage
+
+For data that only needs to exist for a short time:
+
+```rust
+pub fn set_temp(env: Env, key: Symbol, value: i64) {
+    env.storage().temporary().set(&key, &value);
+}
+```
+
+### Instance Storage
+
+For data tied to the contract instance lifetime:
+
+```rust
+pub fn set_instance(env: Env, key: Symbol, value: i64) {
+    env.storage().instance().set(&key, &value);
+}
+```
+
+<Warning>
+  Always choose the appropriate storage type based on your data's lifetime requirements. Persistent storage is more expensive but provides longer retention.
+</Warning>
+
+## Using Constructors
+
+You can initialize contract state using the `__constructor` function:
+
+```rust
+use soroban_sdk::{contract, contractimpl, contracttype, Env};
+
+#[contracttype]
+pub enum DataKey {
+    Persistent(u32),
+    Temp(u32),
+    Instance(u32),
+}
+
+#[contractimpl]
+impl Contract {
+    pub fn __constructor(env: Env, init_key: u32, init_value: i64) {
+        env.storage()
+            .persistent()
+            .set(&DataKey::Persistent(init_key), &init_value);
+        env.storage()
+            .temporary()
+            .set(&DataKey::Temp(init_key * 2), &(init_value * 2));
+        env.storage()
+            .instance()
+            .set(&DataKey::Instance(init_key * 3), &(init_value * 3));
+    }
+}
+```
+
+<Note>
+  The constructor is called once when the contract is deployed and must receive all required arguments.
+</Note>
+
+## Environment Parameter
+
+The `Env` type provides access to the contract's execution environment:
+
+```rust
+pub fn example(env: Env) {
+    // Access storage
+    let storage = env.storage();
+    
+    // Get ledger info
+    let ledger = env.ledger();
+    
+    // Publish events
+    let events = env.events();
+    
+    // Access crypto functions
+    let crypto = env.crypto();
+}
+```
+
+## Supported Types
+
+Soroban contracts support various types:
+
+### Primitive Types
+- `u32`, `i32`, `u64`, `i64`, `u128`, `i128`
+- `bool`
+- `()` (unit type)
+
+### SDK Types
+- `Address` - Contract and account addresses
+- `Symbol` - Short strings (up to 32 characters)
+- `String` - Arbitrary length strings
+- `Bytes`, `BytesN` - Binary data
+- `Vec` - Dynamic arrays
+- `Map` - Key-value mappings
+
+### Custom Types
+
+Use `#[contracttype]` to define custom types (see [Custom Types](/guides/custom-types) guide).
+
+## Complete Example
+
+Here's a complete contract that demonstrates key concepts:
+
+<CodeGroup>
+
+```rust src/lib.rs
+#![no_std]
+use soroban_sdk::{contract, contractimpl, contracttype, Env, Symbol};
+
+#[contract]
+pub struct Contract;
+
+#[contracttype]
+pub enum DataKey {
+    Counter,
+    Owner,
+}
+
+#[contractimpl]
+impl Contract {
+    /// Initialize the contract with an owner
+    pub fn __constructor(env: Env, owner: Symbol) {
+        env.storage().persistent().set(&DataKey::Owner, &owner);
+        env.storage().persistent().set(&DataKey::Counter, &0i64);
+    }
+
+    /// Increment the counter
+    pub fn increment(env: Env) -> i64 {
+        let mut counter: i64 = env.storage()
+            .persistent()
+            .get(&DataKey::Counter)
+            .unwrap_or(0);
+        
+        counter += 1;
+        env.storage().persistent().set(&DataKey::Counter, &counter);
+        counter
+    }
+
+    /// Get the current counter value
+    pub fn get_counter(env: Env) -> i64 {
+        env.storage()
+            .persistent()
+            .get(&DataKey::Counter)
+            .unwrap_or(0)
+    }
+}
+```
+
+```toml Cargo.toml
+[package]
+name = "my-contract"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+soroban-sdk = "22.0.0"
+
+[dev-dependencies]
+soroban-sdk = { version = "22.0.0", features = ["testutils"] }
+
+[profile.release]
+opt-level = "z"
+overflow-checks = true
+debug = 0
+strip = "symbols"
+debug-assertions = false
+panic = "abort"
+codegen-units = 1
+lto = true
+
+[profile.release-with-logs]
+inherits = "release"
+debug-assertions = true
+```
+
+</CodeGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Testing Contracts" icon="flask" href="/guides/testing">
+    Learn how to write tests for your contracts
+  </Card>
+  <Card title="Custom Types" icon="shapes" href="/guides/custom-types">
+    Define custom data structures
+  </Card>
+  <Card title="Error Handling" icon="triangle-exclamation" href="/guides/error-handling">
+    Handle errors gracefully in your contracts
+  </Card>
+  <Card title="Events" icon="broadcast-tower" href="/guides/events">
+    Publish events from your contracts
+  </Card>
+</CardGroup>

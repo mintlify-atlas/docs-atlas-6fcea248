@@ -1,0 +1,277 @@
+---
+title: Cryptography
+description: Advanced cryptographic operations in the Soroban Rust SDK
+---
+
+The Soroban SDK provides comprehensive cryptographic primitives through the `Crypto` module, including support for elliptic curve operations on BLS12-381 and BN254 curves.
+
+## Accessing Crypto Functions
+
+Access cryptographic functions through the environment:
+
+```rust
+use soroban_sdk::{Env, Bytes};
+
+let env = Env::default();
+let crypto = env.crypto();
+```
+
+## Hash Functions
+
+### SHA-256
+
+Compute SHA-256 hash of data:
+
+```rust
+let data = Bytes::from_slice(&env, b"hello world");
+let hash = crypto.sha256(&data);
+// Returns Hash<32> - a cryptographically secure hash
+```
+
+### Keccak-256
+
+Compute Keccak-256 hash (used in Ethereum):
+
+```rust
+let data = Bytes::from_slice(&env, b"hello world");
+let hash = crypto.keccak256(&data);
+// Returns Hash<32>
+```
+
+## Digital Signatures
+
+### ED25519
+
+Verify ED25519 signatures:
+
+```rust
+use soroban_sdk::BytesN;
+
+let public_key: BytesN<32> = /* ... */;
+let message = Bytes::from_slice(&env, b"message");
+let signature: BytesN<64> = /* ... */;
+
+crypto.ed25519_verify(&public_key, &message, &signature);
+// Panics if verification fails
+```
+
+### ECDSA secp256k1
+
+Recover public key from signature:
+
+```rust
+let message_digest = crypto.sha256(&message);
+let signature: BytesN<64> = /* ... */;
+let recovery_id: u32 = 0;
+
+let public_key = crypto.secp256k1_recover(&message_digest, &signature, recovery_id);
+// Returns BytesN<65> - SEC-1-encoded public key
+```
+
+### ECDSA secp256r1
+
+Verify secp256r1 signatures:
+
+```rust
+let public_key: BytesN<65> = /* ... */;
+let message_digest = crypto.sha256(&message);
+let signature: BytesN<64> = /* ... */;
+
+crypto.secp256r1_verify(&public_key, &message_digest, &signature);
+```
+
+## BLS12-381 Curve Operations
+
+The BLS12-381 curve is used for pairing-based cryptography and BLS signatures.
+
+### Accessing BLS12-381
+
+```rust
+use soroban_sdk::crypto::bls12_381::{Bls12_381, G1Affine, G2Affine, Fr};
+
+let bls = env.crypto().bls12_381();
+```
+
+### Field Elements
+
+```rust
+use soroban_sdk::{bytesn, crypto::bls12_381::Fp};
+
+// Create a field element
+let fp = Fp::from_array(&env, &[0u8; 48]);
+
+// Field arithmetic
+let neg_fp = -fp;
+```
+
+### G1 Point Operations
+
+```rust
+use soroban_sdk::bytesn;
+
+// Generator point in G1
+let g1_generator = G1Affine::from_bytes(bytesn!(&env, 
+    0x17f1d3a73197d7942695638c4fa9ac0fc3688c4f9774b905a14e3a3f171bac586c55e83ff97a1aeffb3af00adb22c6bb08b3f481e3aaa0f1a09e30ed741d8ae4fcf5e095d5d00af600db18cb2c04b3edd03cc744a2888ae40caa232946c5e7e1
+));
+
+// Point addition
+let result = bls.g1_add(&point1, &point2);
+
+// Scalar multiplication
+let scalar = Fr::from_u256(U256::from_u32(&env, 5));
+let result = bls.g1_mul(&point1, &scalar);
+
+// Check if point is in correct subgroup
+let is_valid = bls.g1_is_in_subgroup(&point1);
+
+// Multi-scalar multiplication (MSM)
+let points = vec![&env, point1, point2];
+let scalars = vec![&env, scalar1, scalar2];
+let result = bls.g1_msm(points, scalars);
+```
+
+### G2 Point Operations
+
+```rust
+// G2 operations are similar to G1
+let result = bls.g2_add(&p1, &p2);
+let result = bls.g2_mul(&p1, &scalar);
+let is_valid = bls.g2_is_in_subgroup(&p1);
+```
+
+### Hash to Curve
+
+Map arbitrary data to curve points:
+
+```rust
+// Hash to G1
+let msg = Bytes::from_slice(&env, b"message");
+let dst = Bytes::from_slice(&env, b"DOMAIN_SEPARATION_TAG");
+let point = bls.hash_to_g1(&msg, &dst);
+
+// Hash to G2
+let point = bls.hash_to_g2(&msg, &dst);
+```
+
+### Pairing Operations
+
+Perform pairing checks for signature verification:
+
+```rust
+use soroban_sdk::Vec;
+
+// Pairing check: e(P1, Q1) * e(P2, Q2) == 1
+let g1_points = vec![&env, p1, p2];
+let g2_points = vec![&env, q1, q2];
+
+let is_valid = bls.pairing_check(g1_points, g2_points);
+```
+
+### Scalar Field Arithmetic
+
+```rust
+// Fr represents elements in the scalar field
+let a = Fr::from_u256(U256::from_u32(&env, 10));
+let b = Fr::from_u256(U256::from_u32(&env, 5));
+
+// Arithmetic operations
+let sum = bls.fr_add(&a, &b);
+let diff = bls.fr_sub(&a, &b);
+let product = bls.fr_mul(&a, &b);
+let power = bls.fr_pow(&a, 3);
+let inverse = bls.fr_inv(&a);
+```
+
+## BN254 Curve Operations
+
+BN254 (alt_bn128) is Ethereum-compatible and commonly used in zkSNARKs.
+
+### Accessing BN254
+
+```rust
+use soroban_sdk::crypto::bn254::{Bn254, Bn254G1Affine, Bn254G2Affine};
+
+let bn254 = env.crypto().bn254();
+```
+
+### G1 Operations
+
+```rust
+// Point addition
+let result = bn254.g1_add(&point1, &point2);
+
+// Scalar multiplication
+let scalar = bn254::Fr::from_u256(U256::from_u32(&env, 5));
+let result = bn254.g1_mul(&point1, &scalar);
+```
+
+### Pairing Check (Ethereum-compatible)
+
+```rust
+use soroban_sdk::Vec;
+
+// BN254 pairing for zkSNARK verification
+let g1_points = vec![&env, p1, p2];
+let g2_points = vec![&env, q1, q2];
+
+let is_valid = bn254.pairing_check(g1_points, g2_points);
+```
+
+## Best Practices
+
+### Use Checked Operations for Subgroup Safety
+
+When aggregating multiple points, use checked operations on the final result:
+
+```rust
+// Use unchecked operations for intermediate additions
+let temp1 = bls.g1_add(&p0, &p1);
+let temp2 = bls.g1_add(&temp1, &p2);
+
+// Use checked operation for final result to ensure correctness
+let final_result = bls.g1_checked_add(&temp2, &p3);
+match final_result {
+    Some(point) => {
+        // Point is in correct subgroup
+    },
+    None => {
+        // Point is not in correct subgroup
+    }
+}
+```
+
+### Hash Type Safety
+
+The `Hash<N>` type ensures values come from cryptographic hash functions:
+
+```rust
+use soroban_sdk::crypto::Hash;
+
+// Hash<32> can only be created from secure hash functions
+let hash: Hash<32> = crypto.sha256(&data);
+
+// Convert to bytes when needed
+let bytes = hash.to_bytes();
+let array = hash.to_array();
+```
+
+### Hazmat Crypto
+
+Low-level operations are available but should be used with caution:
+
+```rust
+// ⚠️ Warning: These operations can be insecure if misused
+// Only use if you understand the security implications
+```
+
+## Performance Considerations
+
+- **MSM operations** are optimized for multiple scalar multiplications
+- **Subgroup checks** are expensive; minimize their use in loops
+- **Pairing operations** are the most expensive; batch verifications when possible
+- BLS12-381 operations are generally slower but more secure than BN254
+- BN254 operations are faster and Ethereum-compatible
+
+## Related
+
+- [Authentication](/core/authentication)

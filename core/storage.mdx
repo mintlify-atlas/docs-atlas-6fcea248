@@ -1,0 +1,468 @@
+---
+title: "Storage System"
+description: "Understanding Persistent, Temporary, and Instance storage in Soroban contracts"
+---
+
+## Overview
+
+Soroban provides three types of storage with different characteristics and costs. Each type is optimized for specific use cases and has distinct TTL (Time-To-Live) behavior.
+
+## Storage Types
+
+<CardGroup cols={3}>
+  <Card title="Persistent" icon="database">
+    Long-term data that can be restored after expiration
+  </Card>
+  <Card title="Temporary" icon="clock">
+    Short-term data that is permanently deleted after expiration
+  </Card>
+  <Card title="Instance" icon="box">
+    Contract-level data tied to the contract instance
+  </Card>
+</CardGroup>
+
+## Accessing Storage
+
+Access storage through the `Env`:
+
+```rust
+use soroban_sdk::{Env, Symbol, symbol_short};
+
+pub fn storage_access(env: Env) {
+    // Persistent storage
+    let persistent = env.storage().persistent();
+    
+    // Temporary storage  
+    let temporary = env.storage().temporary();
+    
+    // Instance storage
+    let instance = env.storage().instance();
+}
+```
+
+<Warning>
+Storage can only be accessed within a contract context. Calling storage methods outside a contract will panic with error: "`env.as_contract()` required".
+</Warning>
+
+## Persistent Storage
+
+### Characteristics
+
+- **Durability**: Data persists until explicitly deleted or expired
+- **Expiration**: Can be restored from Expired State Stack (ESS)
+- **Cost**: More expensive than temporary storage
+- **Use Cases**: User balances, ownership records, critical state
+
+### Basic Operations
+
+```rust
+use soroban_sdk::{contracttype, symbol_short};
+
+#[contracttype]
+pub enum DataKey {
+    Balance(Address),
+    TotalSupply,
+}
+
+pub fn persistent_operations(env: Env, user: Address) {
+    let key = DataKey::Balance(user);
+    
+    // Set value
+    env.storage().persistent().set(&key, &1000i128);
+    
+    // Get value
+    let balance: Option<i128> = env.storage().persistent().get(&key);
+    
+    // Check existence
+    let exists = env.storage().persistent().has(&key);
+    
+    // Remove value
+    env.storage().persistent().remove(&key);
+}
+```
+
+### Update Operations
+
+```rust
+pub fn increment_balance(env: Env, user: Address, amount: i128) {
+    let key = DataKey::Balance(user);
+    
+    // Update with closure
+    env.storage().persistent().update(&key, |balance: Option<i128>| {
+        balance.unwrap_or(0) + amount
+    });
+}
+
+pub fn try_update_balance(
+    env: Env,
+    user: Address,
+    amount: i128,
+) -> Result<i128, Error> {
+    let key = DataKey::Balance(user);
+    
+    // Update with error handling
+    env.storage().persistent().try_update(
+        &key,
+        |balance: Option<i128>| {
+            let current = balance.unwrap_or(0);
+            if current + amount < 0 {
+                return Err(Error::InsufficientBalance);
+            }
+            Ok(current + amount)
+        },
+    )
+}
+```
+
+### TTL Management
+
+```rust
+pub fn extend_storage_ttl(env: Env, key: DataKey) {
+    // Extend TTL if below threshold
+    // threshold: extend only if TTL < 100 ledgers
+    // extend_to: extend to 1000 ledgers
+    env.storage().persistent().extend_ttl(&key, 100, 1000);
+}
+
+pub fn get_max_ttl(env: Env) -> u32 {
+    env.storage().max_ttl()
+}
+```
+
+<Note>
+Extend TTL before it expires to avoid restoration costs. The extension only happens if current TTL is below the threshold.
+</Note>
+
+## Temporary Storage
+
+### Characteristics
+
+- **Durability**: Permanently deleted after expiration
+- **Expiration**: Cannot be restored
+- **Cost**: Cheaper than persistent storage
+- **Use Cases**: Caches, oracle data, temporary offers
+
+### Basic Operations
+
+```rust
+pub fn temporary_operations(env: Env) {
+    let key = symbol_short!("cache");
+    
+    // Set with automatic TTL
+    env.storage().temporary().set(&key, &42u32);
+    
+    // Get value
+    let value: Option<u32> = env.storage().temporary().get(&key);
+    
+    // Check and remove
+    if env.storage().temporary().has(&key) {
+        env.storage().temporary().remove(&key);
+    }
+}
+```
+
+### TTL Management
+
+```rust
+pub fn manage_temp_ttl(env: Env) {
+    let key = symbol_short!("offer");
+    
+    env.storage().temporary().set(&key, &100u32);
+    
+    // Extend temporary storage TTL
+    env.storage().temporary().extend_ttl(&key, 10, 100);
+}
+```
+
+<Warning>
+Trying to extend temporary storage beyond max TTL will cause a panic. Always check against `env.storage().max_ttl()`.
+</Warning>
+
+### Expiration Behavior
+
+```rust
+#[test]
+fn test_temp_expiration() {
+    let env = Env::default();
+    env.ledger().set_sequence_number(1000);
+    env.ledger().set_min_temp_entry_ttl(100);
+    
+    let contract = env.register(Contract, ());
+    env.as_contract(&contract, || {
+        env.storage().temporary().set(&1, &2);
+        
+        // After TTL expires, entry is gone forever
+        env.ledger().set_sequence_number(1100);
+        assert!(!env.storage().temporary().has(&1));
+    });
+}
+```
+
+## Instance Storage
+
+### Characteristics
+
+- **Durability**: Same as persistent (can be restored)
+- **Scope**: Shared across the contract instance
+- **Loading**: Loaded with the contract instance
+- **Size Limit**: ~100 KB serialized
+- **Use Cases**: Admin address, contract config, token metadata
+
+### Basic Operations
+
+```rust
+pub fn instance_operations(env: Env, admin: Address) {
+    // Set contract admin
+    env.storage().instance().set(&symbol_short!("ADMIN"), &admin);
+    
+    // Get admin
+    let admin: Address = env.storage()
+        .instance()
+        .get(&symbol_short!("ADMIN"))
+        .unwrap();
+    
+    // Update config
+    env.storage().instance().update(
+        &symbol_short!("CONFIG"),
+        |config: Option<Config>| {
+            let mut c = config.unwrap_or_default();
+            c.fee_rate = 100;
+            c
+        },
+    );
+}
+```
+
+### TTL Management
+
+```rust
+pub fn extend_instance_ttl(env: Env) {
+    // Extends both instance AND code TTL
+    env.storage().instance().extend_ttl(100, 1000);
+}
+```
+
+<Note>
+Instance storage TTL extension extends both the contract instance and the contract code. This is more efficient than extending them separately.
+</Note>
+
+## Storage Patterns
+
+### Counter Pattern
+
+```rust
+#[contracttype]
+#[derive(Clone, Default)]
+pub struct Counter {
+    pub count: u32,
+}
+
+pub fn increment(env: Env) -> u32 {
+    let key = symbol_short!("COUNTER");
+    
+    let counter = env.storage()
+        .persistent()
+        .update(&key, |c: Option<Counter>| {
+            let mut counter = c.unwrap_or_default();
+            counter.count += 1;
+            counter
+        });
+    
+    counter.count
+}
+```
+
+### Registry Pattern
+
+```rust
+use soroban_sdk::Map;
+
+pub fn register_user(env: Env, user: Address, info: UserInfo) {
+    let mut registry: Map<Address, UserInfo> = env.storage()
+        .persistent()
+        .get(&symbol_short!("REGISTRY"))
+        .unwrap_or_else(|| Map::new(&env));
+    
+    registry.set(user, info);
+    env.storage().persistent().set(&symbol_short!("REGISTRY"), &registry);
+}
+```
+
+### Cache Pattern
+
+```rust
+pub fn get_cached_price(env: Env, asset: Symbol) -> Option<i128> {
+    let key = DataKey::PriceCache(asset);
+    
+    // Check cache first
+    if let Some(price) = env.storage().temporary().get(&key) {
+        return Some(price);
+    }
+    
+    // Fetch from oracle (expensive operation)
+    let price = fetch_from_oracle(&env, asset);
+    
+    // Cache for 100 ledgers
+    env.storage().temporary().set(&key, &price);
+    env.storage().temporary().extend_ttl(&key, 0, 100);
+    
+    Some(price)
+}
+```
+
+## Testing Storage
+
+### Basic Test
+
+```rust
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use soroban_sdk::testutils::storage::{Persistent, Instance};
+
+    #[test]
+    fn test_storage() {
+        let env = Env::default();
+        let contract_id = env.register(Contract, ());
+        let client = ContractClient::new(&env, &contract_id);
+        
+        // Set values
+        client.set_persistent(&1, &100);
+        
+        // Verify
+        assert_eq!(client.get_persistent(&1), Some(100));
+        
+        // Check TTL
+        let ttl = env.as_contract(&contract_id, || {
+            env.storage().persistent().get_ttl(&1)
+        });
+        assert!(ttl > 0);
+    }
+}
+```
+
+### Testing All Storage Types
+
+```rust
+#[test]
+fn test_all_storage_types() {
+    let env = Env::default();
+    env.ledger().set_min_persistent_entry_ttl(100);
+    env.ledger().set_min_temp_entry_ttl(50);
+    
+    let contract = env.register(Contract, ());
+    
+    env.as_contract(&contract, || {
+        // Test persistent
+        env.storage().persistent().set(&1, &100);
+        assert_eq!(env.storage().persistent().get(&1), Some(100));
+        
+        // Test temporary
+        env.storage().temporary().set(&2, &200);
+        assert_eq!(env.storage().temporary().get(&2), Some(200));
+        
+        // Test instance
+        env.storage().instance().set(&3, &300);
+        assert_eq!(env.storage().instance().get(&3), Some(300));
+    });
+}
+```
+
+### Viewing All Storage
+
+```rust
+use soroban_sdk::testutils::storage::{Persistent, Temporary, Instance};
+
+#[test]
+fn view_all_storage() {
+    let env = Env::default();
+    let contract = env.register(Contract, ());
+    
+    env.as_contract(&contract, || {
+        env.storage().persistent().set(&1, &10);
+        env.storage().persistent().set(&2, &20);
+        env.storage().temporary().set(&3, &30);
+        env.storage().instance().set(&4, &40);
+    });
+    
+    // View all persistent entries
+    env.as_contract(&contract, || {
+        let all_persistent = env.storage().persistent().all();
+        println!("Persistent: {:?}", all_persistent);
+    });
+}
+```
+
+## Storage Costs
+
+<Tabs>
+  <Tab title="Persistent">
+    - **Write**: Moderate cost
+    - **Read**: Moderate cost  
+    - **TTL Extension**: Low cost
+    - **Restoration**: Moderate cost
+    - **Use when**: Data must survive long-term
+  </Tab>
+  <Tab title="Temporary">
+    - **Write**: Low cost
+    - **Read**: Low cost
+    - **TTL Extension**: Very low cost
+    - **Restoration**: Not possible
+    - **Use when**: Data has limited lifetime
+  </Tab>
+  <Tab title="Instance">
+    - **Write**: Moderate cost (same as persistent)
+    - **Read**: Very low cost (loaded with contract)
+    - **TTL Extension**: Low cost
+    - **Size Limit**: ~100 KB
+    - **Use when**: Small, frequently accessed contract config
+  </Tab>
+</Tabs>
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Choose the right storage type">
+    Use temporary for caches and time-limited data, persistent for critical data, and instance for small contract-level config.
+  </Accordion>
+  
+  <Accordion title="Extend TTL proactively">
+    Extend TTL before expiration. Use threshold parameter to avoid unnecessary extensions.
+  </Accordion>
+  
+  <Accordion title="Keep instance storage small">
+    Instance storage is loaded with every contract call. Keep it under 10 KB for optimal performance.
+  </Accordion>
+  
+  <Accordion title="Use appropriate keys">
+    Use `Symbol` for simple keys, enums with `#[contracttype]` for complex key structures.
+  </Accordion>
+  
+  <Accordion title="Batch storage operations">
+    Group related storage operations together to minimize round-trips.
+  </Accordion>
+</AccordionGroup>
+
+## Storage Method Reference
+
+| Method | Persistent | Temporary | Instance |
+|--------|------------|-----------|----------|
+| `set(key, val)` | ✓ | ✓ | ✓ |
+| `get(key)` | ✓ | ✓ | ✓ |
+| `has(key)` | ✓ | ✓ | ✓ |
+| `remove(key)` | ✓ | ✓ | ✓ |
+| `update(key, fn)` | ✓ | ✓ | ✓ |
+| `try_update(key, fn)` | ✓ | ✓ | ✓ |
+| `extend_ttl(key, ...)` | ✓ | ✓ | - |
+| `extend_ttl(...)` | - | - | ✓ |
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Types" href="/core/types" icon="shapes">
+    Learn about types you can store
+  </Card>
+  <Card title="Authentication" href="/core/authentication" icon="shield">
+    Understand auth and authorization
+  </Card>
+</CardGroup>

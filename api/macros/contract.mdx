@@ -1,0 +1,64 @@
+---
+title: "#[contract]"
+description: "Marks a type as being the type that contract functions are attached for"
+---
+
+Marks a type as being the type that contract functions are attached for.
+
+Use `#[contractimpl]` on impl blocks of this type to make those functions contract functions.
+
+Note that a crate only ever exports a single contract. While there can be multiple types in a crate with `#[contract]`, when built as a wasm file and deployed the combination of all contract functions and all contracts within a crate will be seen as a single contract.
+
+## Syntax
+
+```rust
+#[contract]
+pub struct ContractName;
+```
+
+## Parameters
+
+<ParamField path="crate_path" type="Path" default="soroban_sdk">
+  Optional path to the Soroban SDK crate. Use this if you've renamed the crate in your `Cargo.toml`.
+</ParamField>
+
+## Generated Code
+
+The `#[contract]` macro generates:
+- A client type (`ContractNameClient`) for calling the contract
+- An args type (`ContractNameArgs`) for contract arguments
+- Test utilities when the `testutils` feature is enabled
+
+## Example
+
+Define a contract with one function, `hello`, and call it from within a test using the generated client.
+
+```rust
+use soroban_sdk::{contract, contractimpl, vec, symbol_short, BytesN, Env, Symbol, Vec};
+
+#[contract]
+pub struct HelloContract;
+
+#[contractimpl]
+impl HelloContract {
+    pub fn hello(env: Env, to: Symbol) -> Vec<Symbol> {
+        vec![&env, symbol_short!("Hello"), to]
+    }
+}
+
+#[test]
+fn test() {
+    let env = Env::default();
+    let contract_id = env.register(HelloContract, ());
+    let client = HelloContractClient::new(&env, &contract_id);
+
+    let words = client.hello(&symbol_short!("Dev"));
+
+    assert_eq!(words, vec![&env, symbol_short!("Hello"), symbol_short!("Dev"),]);
+}
+```
+
+## See Also
+
+- [`#[contractimpl]`](/api/macros/contractimpl) - Export contract functions
+- [`contractimport!`](/api/macros/contractimport) - Import external contracts

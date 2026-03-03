@@ -1,0 +1,113 @@
+---
+title: "#[contracterror]"
+description: "Generates conversions from a repr(u32) enum from/into an Error"
+---
+
+Generates conversions from a `repr(u32)` enum from/into an `Error`.
+
+Includes the type in the contract spec so that clients can generate bindings for the type.
+
+## Syntax
+
+```rust
+#[contracterror]
+#[repr(u32)]
+pub enum ErrorName {
+    Variant1 = 1,
+    Variant2 = 2,
+}
+```
+
+## Parameters
+
+<ParamField path="crate_path" type="Path" default="soroban_sdk">
+  Optional path to the Soroban SDK crate. Use this if you've renamed the crate in your `Cargo.toml`.
+</ParamField>
+
+<ParamField path="export" type="bool">
+  Whether to include this type in the contract specification. If not specified, types are exported if they are `pub`.
+</ParamField>
+
+<ParamField path="lib" type="String">
+  Optional library name for organizing types in the contract specification.
+</ParamField>
+
+## Constraints
+
+There are several constraints on the types that are supported:
+- The enum must derive `Copy`
+- All enum variants must have an explicit integer literal
+- Enum variants must have a value convertible to `u32`
+- The enum must be marked with `#[repr(u32)]`
+
+## Example
+
+### Defining an error and capturing errors using the `try_` variant
+
+```rust
+use soroban_sdk::{contract, contracterror, contractimpl, Env};
+
+#[contracterror]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[repr(u32)]
+pub enum Error {
+    MyError = 1,
+    AnotherError = 2,
+}
+
+#[contract]
+pub struct Contract;
+
+#[contractimpl]
+impl Contract {
+    pub fn causeerror(env: Env) -> Result<(), Error> {
+        Err(Error::MyError)
+    }
+}
+
+#[test]
+fn test() {
+    let env = Env::default();
+
+    // Register the contract defined in this crate.
+    let contract_id = env.register(Contract, ());
+
+    // Create a client for calling the contract.
+    let client = ContractClient::new(&env, &contract_id);
+
+    // Invoke contract causeerror function, but use the try_ variant that
+    // will capture the error so we can inspect.
+    let result = client.try_causeerror();
+    assert_eq!(result, Err(Ok(Error::MyError)));
+}
+```
+
+### Testing invocations that cause errors with `should_panic`
+
+Alternatively, you can test error cases using the `#[should_panic]` attribute:
+
+```rust
+#[test]
+#[should_panic(expected = "ContractError(1)")]
+fn test() {
+    let env = Env::default();
+    let contract_id = env.register(Contract, ());
+    let client = ContractClient::new(&env, &contract_id);
+    
+    // This will panic with ContractError(1)
+    client.causeerror();
+}
+```
+
+## Error Handling
+
+When a contract function returns a `Result<T, E>` where `E` is an error type marked with `#[contracterror]`:
+
+- If the function returns `Ok(value)`, the value is returned to the caller
+- If the function returns `Err(error)`, the contract panics with the error code
+- Client functions have `try_` variants that return `Result<T, Result<E, InvokeError>>`, allowing you to capture and inspect errors in tests
+
+## See Also
+
+- [`#[contracttype]`](/api/macros/contracttype) - Define general contract types
+- [Error Handling Guide](/guides/error-handling) - Complete error handling guide

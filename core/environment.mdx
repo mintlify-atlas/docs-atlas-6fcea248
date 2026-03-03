@@ -1,0 +1,352 @@
+---
+title: "Environment (Env)"
+description: "The Env type provides access to the execution environment and host functions in Soroban contracts"
+---
+
+## Overview
+
+The `Env` type is the primary interface between your contract code and the Soroban host environment. It provides access to storage, events, cryptographic functions, ledger information, and more.
+
+## Getting the Environment
+
+The `Env` is typically passed as the first parameter to contract functions:
+
+```rust
+use soroban_sdk::{contract, contractimpl, Env, Symbol, Vec};
+
+#[contract]
+pub struct Contract;
+
+#[contractimpl]
+impl Contract {
+    pub fn hello(env: Env, to: Symbol) -> Vec<Symbol> {
+        // Use env to access environment functions
+        vec![&env, symbol_short!("Hello"), to]
+    }
+}
+```
+
+<Note>
+You can use either `Env` or `&Env` as the parameter type. Use `&Env` when you don't need to clone the environment.
+</Note>
+
+## Core Environment Functions
+
+### Storage Access
+
+Access contract storage through the `storage()` method:
+
+```rust
+pub fn store_value(env: Env, key: Symbol, value: u32) {
+    env.storage().persistent().set(&key, &value);
+}
+
+pub fn get_value(env: Env, key: Symbol) -> Option<u32> {
+    env.storage().persistent().get(&key)
+}
+```
+
+### Current Contract Address
+
+Get the address of the currently executing contract:
+
+```rust
+pub fn get_self(env: Env) -> Address {
+    env.current_contract_address()
+}
+```
+
+### Events
+
+Publish events for off-chain consumers:
+
+```rust
+pub fn transfer(env: Env, from: Address, to: Address, amount: i128) {
+    // Perform transfer logic...
+    
+    env.events().publish(
+        (symbol_short!("transfer"), from.clone(), to.clone()),
+        amount
+    );
+}
+```
+
+### Ledger Information
+
+Access current ledger state:
+
+```rust
+pub fn get_timestamp(env: Env) -> u64 {
+    env.ledger().timestamp()
+}
+
+pub fn get_sequence(env: Env) -> u32 {
+    env.ledger().sequence()
+}
+```
+
+## Cryptographic Functions
+
+### Hashing
+
+```rust
+use soroban_sdk::Bytes;
+
+pub fn hash_data(env: Env, data: Bytes) -> BytesN<32> {
+    env.crypto().sha256(&data)
+}
+
+pub fn keccak_hash(env: Env, data: Bytes) -> BytesN<32> {
+    env.crypto().keccak256(&data)
+}
+```
+
+### Signature Verification
+
+```rust
+pub fn verify_signature(
+    env: Env,
+    public_key: BytesN<32>,
+    message: Bytes,
+    signature: BytesN<64>,
+) -> bool {
+    env.crypto().ed25519_verify(
+        &public_key,
+        &message,
+        &signature,
+    );
+    true
+}
+```
+
+## Contract Invocation
+
+### Calling Other Contracts
+
+Invoke functions on other contracts:
+
+```rust
+pub fn call_other(env: Env, contract_id: Address) -> u32 {
+    let result: u32 = env.invoke_contract(
+        &contract_id,
+        &symbol_short!("get_value"),
+        vec![&env],
+    );
+    result
+}
+```
+
+### Try Invoke (Error Handling)
+
+Call contracts with error handling:
+
+```rust
+use soroban_sdk::{InvokeError, Error};
+
+pub fn safe_call(env: Env, contract_id: Address) -> Result<u32, Error> {
+    match env.try_invoke_contract::<u32, Error>(
+        &contract_id,
+        &symbol_short!("get_value"),
+        vec![&env],
+    ) {
+        Ok(Ok(value)) => Ok(value),
+        Ok(Err(e)) => Err(e),
+        Err(invoke_error) => {
+            // Handle invocation failure
+            Err(Error::from_type_and_code(1, 1))
+        }
+    }
+}
+```
+
+## Random Number Generation
+
+<Warning>
+The PRNG is **not suitable for security-sensitive operations**. It's designed for games and simulations.
+</Warning>
+
+```rust
+pub fn roll_dice(env: Env) -> u64 {
+    env.prng().u64_in_range(1..=6)
+}
+
+pub fn shuffle_seed(env: Env) -> BytesN<32> {
+    env.prng().seed()
+}
+```
+
+## Logging and Debugging
+
+### Debug Logs
+
+Log debug information (only available with testutils):
+
+```rust
+pub fn debug_info(env: Env, value: u32) {
+    env.logs().log("Current value: ", value);
+}
+```
+
+<Note>
+Logs are only available in test environments and are stripped from production WASM builds.
+</Note>
+
+## Deployer Functions
+
+Deploy new contracts from within a contract:
+
+```rust
+use soroban_sdk::{Bytes, BytesN};
+
+pub fn deploy_contract(env: Env, wasm: Bytes, salt: BytesN<32>) -> Address {
+    env.deployer()
+        .with_current_contract(salt)
+        .deploy(wasm)
+}
+```
+
+## Authorization Context
+
+Authorize sub-contract calls on behalf of the current contract:
+
+```rust
+use soroban_sdk::auth::{InvokerContractAuthEntry, SubContractInvocation, ContractContext};
+
+pub fn authorized_call(env: Env, target: Address) {
+    let auth_entries = vec![
+        &env,
+        InvokerContractAuthEntry::Contract(SubContractInvocation {
+            context: ContractContext {
+                contract: target.clone(),
+                fn_name: symbol_short!("protected"),
+                args: vec![&env],
+            },
+            sub_invocations: vec![&env],
+        }),
+    ];
+    
+    env.authorize_as_current_contract(auth_entries);
+    // Now call the protected function...
+}
+```
+
+## Environment in Tests
+
+### Creating Test Environments
+
+```rust
+#[cfg(test)]
+mod test {
+    use super::*;
+    use soroban_sdk::testutils::{Address as _, Ledger};
+
+    #[test]
+    fn test_contract() {
+        let env = Env::default();
+        
+        // Register the contract
+        let contract_id = env.register(Contract, ());
+        let client = ContractClient::new(&env, &contract_id);
+        
+        // Mock authentication
+        env.mock_all_auths();
+        
+        // Set ledger state
+        env.ledger().set_timestamp(1234567890);
+        
+        // Call contract functions
+        let result = client.hello(&symbol_short!("World"));
+    }
+}
+```
+
+### Test Configuration
+
+```rust
+use soroban_sdk::EnvTestConfig;
+
+#[test]
+fn test_with_config() {
+    let config = EnvTestConfig {
+        capture_snapshot_at_drop: false,
+    };
+    let env = Env::new_with_config(config);
+    // ... test code
+}
+```
+
+## Common Environment Methods Reference
+
+| Method | Description |
+|--------|-------------|
+| `env.storage()` | Access contract storage (persistent, temporary, instance) |
+| `env.current_contract_address()` | Get the current contract's address |
+| `env.events()` | Publish contract events |
+| `env.ledger()` | Access ledger information (timestamp, sequence, etc.) |
+| `env.crypto()` | Access cryptographic functions |
+| `env.prng()` | Access pseudo-random number generator |
+| `env.deployer()` | Deploy new contracts |
+| `env.logs()` | Debug logging (testutils only) |
+| `env.invoke_contract()` | Call another contract |
+| `env.authorize_as_current_contract()` | Authorize sub-contract calls |
+
+## Type Conversions
+
+### IntoVal and FromVal
+
+The environment provides conversion utilities:
+
+```rust
+use soroban_sdk::{IntoVal, FromVal, Val};
+
+pub fn convert_example(env: Env) {
+    // Convert to Val
+    let value: Val = 42u32.into_val(&env);
+    
+    // Convert from Val
+    let number: u32 = u32::from_val(&env, &value);
+}
+```
+
+### TryIntoVal and TryFromVal
+
+For fallible conversions:
+
+```rust
+use soroban_sdk::TryFromVal;
+
+pub fn try_convert(env: Env, val: Val) -> Option<u32> {
+    u32::try_from_val(&env, &val).ok()
+}
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Clone Env sparingly">
+    The Env is relatively cheap to clone, but avoid unnecessary clones. Use `&Env` when possible.
+  </Accordion>
+  
+  <Accordion title="Error handling in cross-contract calls">
+    Always use `try_invoke_contract` for cross-contract calls that might fail, and handle errors appropriately.
+  </Accordion>
+  
+  <Accordion title="Ledger info is current">
+    Ledger information reflects the state at the time of invocation. It won't change during contract execution.
+  </Accordion>
+  
+  <Accordion title="Use structured logging">
+    When debugging, use structured log arguments to make logs more useful and searchable.
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Storage" href="/core/storage" icon="database">
+    Learn about persistent, temporary, and instance storage
+  </Card>
+  <Card title="Authentication" href="/core/authentication" icon="shield">
+    Understand address authentication and authorization
+  </Card>
+</CardGroup>

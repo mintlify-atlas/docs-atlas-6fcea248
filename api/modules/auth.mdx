@@ -1,0 +1,166 @@
+---
+title: "auth"
+description: "Authorization and custom account types for Soroban contracts"
+---
+
+The `auth` module contains types for building custom account contracts that implement authorization logic.
+
+## Overview
+
+Custom account contracts implement the `__check_auth` special function to handle authorization for their addresses. When `Address::require_auth` is called for a custom account address, the account contract's `__check_auth` implementation is invoked to verify the authorization.
+
+## Types
+
+### Context
+
+Represents the context of a single authorized call performed by an address.
+
+```rust
+pub enum Context {
+    Contract(ContractContext),
+    CreateContractHostFn(CreateContractHostFnContext),
+    CreateContractWithCtorHostFn(CreateContractWithConstructorHostFnContext),
+}
+```
+
+Custom account contracts receive a list of `Context` values corresponding to all calls that need authorization.
+
+### ContractContext
+
+Authorization context for a single contract call.
+
+```rust
+pub struct ContractContext {
+    pub contract: Address,
+    pub fn_name: Symbol,
+    pub args: Vec<Val>,
+}
+```
+
+This corresponds to a `require_auth_for_args` call with:
+- `contract` - The contract address being called
+- `fn_name` - The function name being invoked
+- `args` - The arguments passed to the function
+
+### CreateContractHostFnContext
+
+Authorization context for creating a contract without constructor arguments.
+
+```rust
+pub struct CreateContractHostFnContext {
+    pub executable: ContractExecutable,
+    pub salt: BytesN<32>,
+}
+```
+
+### CreateContractWithConstructorHostFnContext
+
+Authorization context for creating a contract with constructor arguments.
+
+```rust
+pub struct CreateContractWithConstructorHostFnContext {
+    pub executable: ContractExecutable,
+    pub salt: BytesN<32>,
+    pub constructor_args: Vec<Val>,
+}
+```
+
+### ContractExecutable
+
+Defines the executable used when creating a contract.
+
+```rust
+pub enum ContractExecutable {
+    Wasm(BytesN<32>),
+}
+```
+
+### InvokerContractAuthEntry
+
+A node in the tree of authorizations performed by the current contract as invoker.
+
+```rust
+pub enum InvokerContractAuthEntry {
+    Contract(SubContractInvocation),
+    CreateContractHostFn(CreateContractHostFnContext),
+    CreateContractWithCtorHostFn(CreateContractWithConstructorHostFnContext),
+}
+```
+
+Used with `authorize_as_current_contract` to specify authorization for sub-invocations.
+
+### SubContractInvocation
+
+Value of a contract node in the `InvokerContractAuthEntry` tree.
+
+```rust
+pub struct SubContractInvocation {
+    pub context: ContractContext,
+    pub sub_invocations: Vec<InvokerContractAuthEntry>,
+}
+```
+
+## Traits
+
+### CustomAccountInterface
+
+Interface for implementing custom account authorization.
+
+```rust
+pub trait CustomAccountInterface {
+    type Signature;
+    type Error: Into<Error>;
+
+    fn __check_auth(
+        env: Env,
+        signature_payload: Hash<32>,
+        signatures: Self::Signature,
+        auth_contexts: Vec<Context>,
+    ) -> Result<(), Self::Error>;
+}
+```
+
+**Parameters:**
+- `signature_payload` - Hash of the data that should be signed
+- `signatures` - Custom signature data provided by the invoker
+- `auth_contexts` - List of authorization contexts to verify
+
+**Returns:** `Ok(())` if authorization succeeds, or an error otherwise.
+
+## Example
+
+```rust
+use soroban_sdk::{contract, contractimpl, contracttype, Env, BytesN, Vec};
+use soroban_sdk::auth::{Context, CustomAccountInterface};
+use soroban_sdk::crypto::Hash;
+
+#[contracttype]
+pub enum Signature {
+    Ed25519(BytesN<64>),
+}
+
+#[contract]
+pub struct CustomAccount;
+
+#[contractimpl]
+impl CustomAccountInterface for CustomAccount {
+    type Signature = Signature;
+    type Error = soroban_sdk::Error;
+
+    fn __check_auth(
+        env: Env,
+        signature_payload: Hash<32>,
+        signature: Signature,
+        auth_contexts: Vec<Context>,
+    ) -> Result<(), Self::Error> {
+        // Verify signature against signature_payload
+        // Validate auth_contexts
+        Ok(())
+    }
+}
+```
+
+## See Also
+
+- [Address](/api/types/address) - For `require_auth` and authorization methods
+- [crypto](/api/modules/crypto) - For signature verification functions

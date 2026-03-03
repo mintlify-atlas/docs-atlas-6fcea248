@@ -1,0 +1,413 @@
+---
+title: "Core Types"
+description: "Overview of core Soroban types including Address, Symbol, Bytes, Vec, Map, and more"
+---
+
+## Overview
+
+Soroban provides a set of specialized types optimized for smart contract development. These types are designed to be efficient in the WASM environment and integrate seamlessly with the host environment.
+
+## Address
+
+The `Address` type is a universal identifier for accounts and contracts.
+
+### Creating Addresses
+
+```rust
+use soroban_sdk::{Address, Env};
+
+pub fn use_addresses(env: Env) {
+    // From strkey (G... for accounts, C... for contracts)
+    let addr = Address::from_str(&env, "GABC123...");
+    
+    // Get current contract address
+    let self_addr = env.current_contract_address();
+}
+```
+
+### Address Methods
+
+```rust
+pub fn address_operations(env: Env, addr: Address) {
+    // Require authorization
+    addr.require_auth();
+    
+    // Convert to string
+    let strkey = addr.to_string();
+    
+    // Check if contract/account exists
+    let exists = addr.exists();
+    
+    // Get executable type (Wasm, StellarAsset, or Account)
+    let executable = addr.executable();
+}
+```
+
+<Tip>
+In tests, use `Address::generate(&env)` to create random addresses for testing.
+</Tip>
+
+## Symbol
+
+`Symbol` is a short string type for identifiers with limited character set (`a-zA-Z0-9_`) and maximum length of 32 characters.
+
+### Creating Symbols
+
+```rust
+use soroban_sdk::{Symbol, symbol_short};
+
+// Compile-time symbol (≤ 9 chars, more efficient)
+let short_sym = symbol_short!("balance");
+
+// Runtime symbol (up to 32 chars)
+let long_sym = Symbol::new(&env, "very_long_symbol_name_here");
+```
+
+### Symbol Usage
+
+```rust
+pub fn symbol_as_key(env: Env) {
+    let key = symbol_short!("counter");
+    env.storage().persistent().set(&key, &42u32);
+}
+```
+
+<Note>
+Symbols with 9 or fewer characters are stored more efficiently. Use `symbol_short!` macro when possible.
+</Note>
+
+## Bytes and BytesN
+
+### Bytes (Variable Length)
+
+`Bytes` is a variable-length byte array:
+
+```rust
+use soroban_sdk::{Bytes, bytes};
+
+pub fn bytes_example(env: Env) {
+    // Create from array
+    let b1 = Bytes::from_array(&env, &[1, 2, 3, 4]);
+    
+    // Create from hex literal
+    let b2 = bytes!(&env, 0xdeadbeef);
+    
+    // Operations
+    let len = b1.len();
+    let first = b1.get(0).unwrap();
+    let sliced = b1.slice(1..3);
+    
+    // Append
+    let mut b3 = b1.clone();
+    b3.append(&b2);
+}
+```
+
+### BytesN (Fixed Length)
+
+`BytesN<N>` is a fixed-length byte array:
+
+```rust
+use soroban_sdk::{BytesN, bytesn};
+
+pub fn bytesn_example(env: Env) {
+    // Create 32-byte hash
+    let hash = bytesn!(
+        &env,
+        0xfded3f55dec47250a52a8c0bb7038e72fa6ffaae33562f77cd2b629ef7fd424d
+    );
+    
+    // Use in crypto operations
+    let result = env.crypto().sha256(&bytes!(&env, [1, 2, 3]));
+    assert_eq!(result.len(), 32);
+}
+```
+
+## Vec (Vector)
+
+`Vec<T>` is a growable array type:
+
+```rust
+use soroban_sdk::{vec, Vec, Symbol};
+
+pub fn vec_example(env: Env) {
+    // Create with vec! macro
+    let v1 = vec![&env, 1, 2, 3, 4, 5];
+    
+    // Create and push
+    let mut v2 = Vec::new(&env);
+    v2.push_back(10);
+    v2.push_back(20);
+    
+    // Access elements
+    let first = v1.get(0).unwrap();
+    
+    // Iterate
+    for item in v1.iter() {
+        // Process item
+    }
+    
+    // Length and operations
+    let len = v1.len();
+    let sliced = v1.slice(1..4);
+}
+```
+
+### Vec Methods
+
+| Method | Description |
+|--------|-------------|
+| `push_back(val)` | Append element to end |
+| `push_front(val)` | Prepend element to start |
+| `pop_back()` | Remove and return last element |
+| `pop_front()` | Remove and return first element |
+| `get(index)` | Get element at index |
+| `set(index, val)` | Set element at index |
+| `len()` | Get number of elements |
+| `is_empty()` | Check if empty |
+| `slice(range)` | Create slice of vec |
+
+## Map
+
+`Map<K, V>` is a key-value mapping:
+
+```rust
+use soroban_sdk::{Map, Symbol, symbol_short};
+
+pub fn map_example(env: Env) {
+    let mut map = Map::new(&env);
+    
+    // Insert key-value pairs
+    map.set(symbol_short!("alice"), 100u32);
+    map.set(symbol_short!("bob"), 200u32);
+    
+    // Get values
+    let alice_balance = map.get(symbol_short!("alice")).unwrap();
+    
+    // Check existence
+    let has_charlie = map.contains_key(symbol_short!("charlie"));
+    
+    // Remove
+    map.remove(symbol_short!("bob"));
+    
+    // Iterate
+    for (key, value) in map.iter() {
+        // Process entries
+    }
+}
+```
+
+### Map Methods
+
+| Method | Description |
+|--------|-------------|
+| `set(key, val)` | Insert or update key-value pair |
+| `get(key)` | Get value for key |
+| `contains_key(key)` | Check if key exists |
+| `remove(key)` | Remove key-value pair |
+| `len()` | Get number of entries |
+| `is_empty()` | Check if map is empty |
+| `keys()` | Get iterator over keys |
+| `values()` | Get iterator over values |
+
+## String
+
+`String` is for text data:
+
+```rust
+use soroban_sdk::String;
+
+pub fn string_example(env: Env) {
+    // Create from str
+    let s1 = String::from_str(&env, "Hello, Soroban!");
+    
+    // Length
+    let len = s1.len();
+    
+    // Convert to Symbol (if short enough)
+    let sym = Symbol::new(&env, "short");
+}
+```
+
+<Warning>
+`String` should be used sparingly in contracts as strings are expensive to process. Prefer `Symbol` for identifiers.
+</Warning>
+
+## Numeric Types
+
+### Standard Integers
+
+Standard Rust integer types are supported:
+- `u32`, `u64`, `u128` - Unsigned integers
+- `i32`, `i64`, `i128` - Signed integers
+
+### Large Integers
+
+For 256-bit integers:
+
+```rust
+use soroban_sdk::{U256, I256};
+
+pub fn large_numbers(env: Env) {
+    let big_num = U256::from_u128(&env, 1000000000000000000u128);
+    let signed = I256::from_i128(&env, -500000000000000000i128);
+}
+```
+
+### Time Types
+
+```rust
+use soroban_sdk::{Timepoint, Duration};
+
+pub fn time_example(env: Env) {
+    // Get current timestamp
+    let now = env.ledger().timestamp();
+    
+    // Create duration (in seconds)
+    let one_day = Duration::from_u64(&env, 86400);
+    
+    // Calculate future timepoint
+    let tomorrow = now + one_day;
+}
+```
+
+## Custom Types
+
+Define custom types with `#[contracttype]`:
+
+### Structs
+
+```rust
+use soroban_sdk::contracttype;
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TokenInfo {
+    pub name: Symbol,
+    pub symbol: Symbol,
+    pub decimals: u32,
+    pub total_supply: i128,
+}
+
+pub fn use_custom_type(env: Env) {
+    let info = TokenInfo {
+        name: symbol_short!("MyToken"),
+        symbol: symbol_short!("MTK"),
+        decimals: 7,
+        total_supply: 1000000_0000000,
+    };
+    
+    env.storage().instance().set(&symbol_short!("INFO"), &info);
+}
+```
+
+### Enums
+
+```rust
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum Status {
+    Pending,
+    Active,
+    Completed,
+}
+
+// Integer enum
+#[contracttype]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[repr(u32)]
+pub enum ErrorCode {
+    InvalidInput = 1,
+    Unauthorized = 2,
+    InsufficientBalance = 3,
+}
+```
+
+## Val (Internal Type)
+
+`Val` is the internal representation of all Soroban values. You rarely work with `Val` directly, but it's used for:
+- Low-level conversions with `IntoVal` and `FromVal`
+- Generic storage operations
+- Cross-contract calls
+
+```rust
+use soroban_sdk::{IntoVal, Val, Vec};
+
+pub fn val_usage(env: Env, val: Val) {
+    // Convert to specific type
+    let number: u32 = val.try_into_val(&env).unwrap();
+    
+    // Store as generic Val
+    let args: Vec<Val> = vec![&env, val];
+}
+```
+
+## Type Conversion
+
+### Into/From Conversions
+
+```rust
+use soroban_sdk::{IntoVal, FromVal};
+
+pub fn conversions(env: Env) {
+    // IntoVal - convert TO Val
+    let val = 42u32.into_val(&env);
+    
+    // FromVal - convert FROM Val
+    let num = u32::from_val(&env, &val);
+}
+```
+
+### Try Conversions
+
+```rust
+use soroban_sdk::TryFromVal;
+
+pub fn try_conversions(env: Env, val: Val) -> Result<u32, ConversionError> {
+    u32::try_from_val(&env, &val)
+}
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Choose the right type">
+    Use `Symbol` for identifiers, `BytesN` for fixed-size data like hashes, and `Bytes` only when length varies.
+  </Accordion>
+  
+  <Accordion title="Prefer compile-time symbols">
+    Use `symbol_short!` macro for symbols ≤ 9 characters - they're more efficient.
+  </Accordion>
+  
+  <Accordion title="Use Vec and Map efficiently">
+    These types grow dynamically but have costs. Consider the size of collections in hot paths.
+  </Accordion>
+  
+  <Accordion title="Minimize String usage">
+    Strings are expensive. Use them only when necessary, prefer `Symbol` for identifiers.
+  </Accordion>
+</AccordionGroup>
+
+## Type Size Reference
+
+| Type | Size/Cost | Use Case |
+|------|-----------|----------|
+| `Symbol` (≤9 chars) | Small (inline) | Function names, short keys |
+| `Symbol` (>9 chars) | Medium (object) | Longer identifiers |
+| `BytesN<N>` | Fixed | Hashes, keys, signatures |
+| `Bytes` | Variable | Dynamic byte data |
+| `Address` | Small (inline) | Account/contract identifiers |
+| `Vec<T>` | Variable | Collections, lists |
+| `Map<K,V>` | Variable | Key-value mappings |
+| `String` | Variable | Text data (use sparingly) |
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Storage" href="/core/storage" icon="database">
+    Learn how to persist these types in contract storage
+  </Card>
+  <Card title="Contracts" href="/core/contracts" icon="file-code">
+    Understand how to use types in contract functions
+  </Card>
+</CardGroup>

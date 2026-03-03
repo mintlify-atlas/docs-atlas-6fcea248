@@ -1,0 +1,369 @@
+---
+title: Breaking Changes
+description: Breaking changes between versions of the Soroban Rust SDK
+---
+
+This page documents all breaking changes across major versions of the Soroban Rust SDK.
+
+## v23 to v25
+
+### Resource Limits Enforced by Default
+
+**Impact**: High - Tests may fail
+
+`Env::default()` now enforces Mainnet resource limits for contract invocations. Tests will panic if any resource limit is exceeded.
+
+**What changed**:
+- Previously: Tests ran without resource enforcement
+- Now: Mainnet resource limits enforced by default
+
+**Migration**:
+```rust
+// If tests fail, temporarily disable limits
+let env = Env::default();
+env.cost_estimate().disable_resource_limits();
+
+// Or set custom limits
+let mut limits = InvocationResourceLimits::mainnet();
+limits.instructions = 100_000_000;
+env.cost_estimate().enforce_resource_limits(limits);
+```
+
+**Mainnet Limits**:
+- Instructions: 600,000,000
+- Memory: 41,943,040 bytes
+- Disk read entries: 100
+- Write entries: 50
+- Ledger entries: 100
+- Disk read bytes: 200,000
+- Write bytes: 132,096
+- Contract events size: 16,384 bytes
+- Max contract data key size: 250 bytes
+- Max contract data entry size: 65,536 bytes
+- Max contract code entry size: 131,072 bytes
+
+### Events API Return Type Changed
+
+**Impact**: Low - Backward compatible
+
+`Events::all()` return type changed from `Vec<(Address, Vec<Val>, Val)>` to `ContractEvents`.
+
+**What changed**:
+- Old return type: `Vec<(Address, Vec<Val>, Val)>`
+- New return type: `ContractEvents`
+
+**Migration**:
+No changes required. The new type supports the old comparison format. New methods available:
+- `filter_by_contract(&Address)` - Filter events by contract
+- `to_xdr()` - Convert events to XDR format
+
+```rust
+// Old style still works
+assert_eq!(env.events().all(), vec![&env, (id, topics, data)]);
+
+// New recommended style
+assert_eq!(env.events().all(), std::vec![event.to_xdr(&env, &id)]);
+```
+
+### New Cryptographic Features (Non-Breaking)
+
+**Impact**: None - Additive only
+
+New features added in v25:
+- BN254 elliptic curve support via `env.crypto().bn254()`
+- Poseidon/Poseidon2 permutations via `hazmat-crypto` feature
+- `contracttrait` macro for reusable interfaces
+
+These are additive features and don't break existing code.
+
+## v22 to v23
+
+### `contractevent` Replaces `Events::publish`
+
+**Impact**: Medium - Recommended migration
+
+The `Events::publish` method is replaced by the type-safe `contractevent` macro.
+
+**What changed**:
+- Old: Manual event publishing with `env.events().publish()`
+- New: Type-safe events with `#[contractevent]`
+
+**Migration**:
+```rust
+// Before
+env.events().publish(
+    (symbol_short!("increment"), &addr),
+    Map::from_array(&env, [(symbol_short!("count"), count.into())])
+);
+
+// After
+#[contractevent]
+pub struct Increment {
+    #[topic]
+    addr: Address,
+    count: u32,
+}
+
+Increment { addr: addr.clone(), count }.publish(&env);
+```
+
+**Benefits**:
+- Type safety for events
+- Automatic specification generation
+- Better tooling support
+- Multiple data formats: map (default), vec, single-value
+
+### Token Transfer Uses `MuxedAddress`
+
+**Impact**: Medium - Token implementations only
+
+The `TokenInterface::transfer` function's `to` parameter changed from `Address` to `MuxedAddress`.
+
+**What changed**:
+- Old signature: `transfer(env: Env, from: Address, to: Address, amount: i128)`
+- New signature: `transfer(env: Env, from: Address, to: MuxedAddress, amount: i128)`
+
+**Migration**:
+```rust
+// Update token implementation
+fn transfer(env: Env, from: Address, muxed_to: MuxedAddress, amount: i128) {
+    from.require_auth();
+    let to = muxed_to.address();  // Extract underlying address
+    token_impl::move_balance(&env, &from, &to, amount);
+    
+    Transfer {
+        from,
+        to,
+        to_muxed_id: muxed_to.id(),  // Optional ID for virtual accounts
+        amount,
+    }.publish(&env);
+}
+```
+
+**Backward Compatibility**:
+`MuxedAddress` accepts `Address` arguments seamlessly. Contracts calling `transfer` don't need changes.
+
+### Archived Entry Testing Behavior Changed
+
+**Impact**: Low - Test behavior change
+
+Accessing archived persistent entries in tests no longer panics. Automatic restoration is emulated instead.
+
+**What changed**:
+- Old behavior: Panic when accessing archived entries
+- New behavior: Automatic restoration emulated
+
+**Migration**:
+```rust
+// Old test approach (no longer works)
+env.ledger().set_sequence_number(current_ledger + 1_000_000 + 1);
+assert!(client.try_read_entry().is_err());  // Expected error
+
+// New recommended approach - verify TTL explicitly
+env.as_contract(&contract, || {
+    assert_eq!(
+        env.storage().persistent().get_ttl(&DataKey::Key),
+        1_000_000
+    );
+});
+```
+
+**Note**: Instance storage is also a persistent entry and subject to this change.
+
+## v21 to v22
+
+### Contract Registration API Changed
+
+**Impact**: High - All tests affected
+
+`Env::register_contract` and `Env::register_contract_wasm` replaced by unified `Env::register` and `Env::register_at`.
+
+**What changed**:
+- Removed: `register_contract`, `register_contract_wasm`
+- Added: `register`, `register_at`
+
+**Migration**:
+```rust
+// Before
+let address = env.register_contract(Contract);
+let address = env.register_contract_wasm(wasm_bytes);
+
+// After
+let address = env.register(Contract, ());  // () for no constructor args
+let address = env.register(wasm_bytes, (arg1, arg2));
+
+// Register at specific address
+let address = Address::generate(&env);
+env.register_at(&address, Contract, ());
+```
+
+**Key differences**:
+- Single API for native and Wasm contracts
+- Constructor arguments required (use `()` if none)
+- More consistent with deployment API
+
+### Contract Deployment API Changed
+
+**Impact**: High - Contract deployments affected
+
+`DeployerWithAddress::deploy` replaced by `DeployerWithAddress::deploy_v2`.
+
+**What changed**:
+- Old: `deploy(wasm_hash)`
+- New: `deploy_v2(wasm_hash, constructor_args)`
+
+**Migration**:
+```rust
+// Before
+let contract_address = deployer.deploy(wasm_hash);
+
+// After
+let contract_address = deployer.deploy_v2(wasm_hash, ());
+
+// With constructor arguments
+let contract_address = deployer.deploy_v2(wasm_hash, (arg1, arg2));
+```
+
+### `fuzz_catch_panic` Deprecated
+
+**Impact**: Low - Fuzz tests only
+
+`fuzz_catch_panic` function deprecated in favor of `try_` client functions.
+
+**What changed**:
+- Deprecated: `fuzz_catch_panic`
+- Recommended: `try_` prefixed client methods
+
+**Migration**:
+```rust
+fuzz_target!(|input: Input| {
+    let env = Env::default();
+    let id = env.register(Contract, ());
+    let client = ContractClient::new(&env, &id);
+    
+    let result = client.try_add(&input.x, &input.y);
+    match result {
+        Ok(Ok(_)) => {},                    // Success with expected type
+        Ok(Err(_)) => panic!("unexpected type"),
+        Err(Ok(_)) => {},                   // Contract error
+        Err(Err(_)) => panic!("unexpected error"),
+    }
+});
+```
+
+### Test Snapshot Events Changed
+
+**Impact**: Medium - Test snapshots affected
+
+Diagnostic events no longer included in test snapshots.
+
+**What changed**:
+- Old: Contract events + system events + diagnostic events
+- New: Contract events + system events only
+
+**Migration**:
+All test snapshot JSON files will change when upgrading. Review changes to ensure only diagnostic events were removed.
+
+## v20 to v21
+
+### CustomAccountInterface Signature Type Changed
+
+**Impact**: Medium - Custom account contracts only
+
+The `__check_auth` function's `signature_payload` parameter changed from `BytesN<32>` to `Hash<32>`.
+
+**What changed**:
+- Old type: `BytesN<32>`
+- New type: `Hash<32>`
+
+**Migration**:
+```rust
+// Before
+fn __check_auth(
+    env: Env,
+    signature_payload: BytesN<32>,
+    signatures: (),
+    auth_contexts: Vec<Context>,
+) -> Result<(), Self::Error> {
+    // ...
+}
+
+// After
+fn __check_auth(
+    env: Env,
+    signature_payload: Hash<32>,
+    signatures: (),
+    auth_contexts: Vec<Context>,
+) -> Result<(), Self::Error> {
+    // ...
+}
+```
+
+**Type conversion**:
+```rust
+// Hash<32> to BytesN<32>
+let bytes: BytesN<32> = hash.to_bytes();
+let bytes: BytesN<32> = hash.into();
+```
+
+**Rationale**: `Hash<32>` provides type safety by ensuring values come from secure cryptographic functions.
+
+## Version Summary
+
+| Version | Major Changes | Impact Level |
+|---------|--------------|-------------|
+| v25 | Resource limits enforced, Events API, BN254, Poseidon | High (tests may fail) |
+| v23 | `contractevent` macro, MuxedAddress, archived entries | Medium |
+| v22 | Registration API, deployment API, test snapshots | High |
+| v21 | CustomAccountInterface signature type | Medium |
+
+## Migration Tips
+
+### Incremental Migration
+
+Migrate one major version at a time:
+1. Update dependencies
+2. Fix compilation errors
+3. Run tests and fix failures
+4. Update test snapshots if needed
+5. Review behavior changes
+
+### Testing Strategy
+
+1. **Compilation**: Ensure code compiles with new SDK
+2. **Unit tests**: Run existing tests to catch behavior changes
+3. **Resource limits**: Test with and without limits to identify optimization needs
+4. **Integration tests**: Verify contracts work correctly with updated dependencies
+
+### Common Issues
+
+**Resource limit failures**:
+```rust
+// Quick fix during migration
+env.cost_estimate().disable_resource_limits();
+
+// Long-term solution: optimize contract
+```
+
+**Type mismatches**:
+```rust
+// Update function signatures to match new types
+// Use .into() for compatible type conversions
+```
+
+**Test snapshot differences**:
+```bash
+# Review changes carefully
+git diff tests/snapshots/
+
+# Regenerate if changes are expected
+rm tests/snapshots/*.json
+cargo test
+```
+
+## Getting Help
+
+- **Documentation**: [docs.rs/soroban-sdk](https://docs.rs/soroban-sdk)
+- **Discord**: [Stellar Discord](https://discord.gg/stellardev)
+- **GitHub**: [rs-soroban-sdk](https://github.com/stellar/rs-soroban-sdk)
+- **Migration guide**: [Migration Overview](/migration/overview)

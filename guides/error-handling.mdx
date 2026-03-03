@@ -1,0 +1,498 @@
+---
+title: "Error Handling"
+description: "Handle errors gracefully using #[contracterror] and Result types"
+---
+
+Proper error handling makes contracts more robust, debuggable, and user-friendly. Soroban provides the `#[contracterror]` macro to define custom error types that can be returned from contract functions.
+
+## Why Custom Errors?
+
+Custom errors provide:
+- **Clear error codes**: Specific numeric codes for each error condition
+- **Type safety**: Compile-time checking of error handling
+- **Better debugging**: Named errors are easier to understand than generic failures
+- **Documentation**: Error types serve as documentation of failure modes
+
+## Defining Error Types
+
+Use the `#[contracterror]` macro to define error enums:
+
+```rust
+use soroban_sdk::contracterror;
+
+#[contracterror]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[repr(u32)]
+pub enum Error {
+    NotFound = 1,
+    Unauthorized = 2,
+    InsufficientBalance = 3,
+    InvalidAmount = 4,
+}
+```
+
+<Note>
+  Error codes must be unique `u32` values. Error code `0` is reserved and cannot be used.
+</Note>
+
+## Returning Errors
+
+Use `Result<T, Error>` as the return type for functions that can fail:
+
+<CodeGroup>
+
+```rust Basic Usage
+#[contractimpl]
+impl Token {
+    pub fn transfer(
+        env: Env,
+        from: Address,
+        to: Address,
+        amount: i128,
+    ) -> Result<(), Error> {
+        from.require_auth();
+
+        if amount <= 0 {
+            return Err(Error::InvalidAmount);
+        }
+
+        let from_balance = Self::get_balance(&env, &from);
+        if from_balance < amount {
+            return Err(Error::InsufficientBalance);
+        }
+
+        // Perform transfer
+        Self::set_balance(&env, &from, from_balance - amount);
+        let to_balance = Self::get_balance(&env, &to);
+        Self::set_balance(&env, &to, to_balance + amount);
+
+        Ok(())
+    }
+}
+```
+
+```rust Returning Values
+pub fn get_price(env: Env, item_id: u64) -> Result<i128, Error> {
+    env.storage()
+        .persistent()
+        .get(&DataKey::Price(item_id))
+        .ok_or(Error::NotFound)
+}
+```
+
+</CodeGroup>
+
+## Complete Example
+
+Here's a complete contract with comprehensive error handling:
+
+```rust
+#![no_std]
+use soroban_sdk::{
+    contract, contracterror, contractimpl, contracttype,
+    panic_with_error, symbol_short, Address, Env, Symbol
+};
+
+#[contract]
+pub struct Contract;
+
+#[contracttype]
+#[derive(PartialEq)]
+pub enum Flag {
+    A = 0,
+    B = 1,
+    C = 2,
+    D = 3,
+    E = 4,
+}
+
+#[contracterror]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[repr(u32)]
+pub enum Error {
+    AnError = 1,
+    NotAuthorized = 2,
+    InvalidInput = 3,
+}
+
+#[contractimpl]
+impl Contract {
+    pub fn hello(env: Env, flag: Flag) -> Result<Symbol, Error> {
+        env.storage()
+            .persistent()
+            .set(&symbol_short!("persisted"), &true);
+
+        match flag {
+            Flag::A => Ok(symbol_short!("hello")),
+            Flag::B => Err(Error::AnError),
+            Flag::C => {
+                // Immediately panic with error
+                panic_with_error!(&env, Error::AnError)
+            },
+            Flag::D => {
+                // Regular panic (not a contract error)
+                panic!("an error")
+            },
+            Flag::E => {
+                // Panic with generic error code
+                panic_with_error!(&env, soroban_sdk::Error::from_contract_error(9))
+            },
+        }
+    }
+}
+```
+
+## Error Handling Strategies
+
+### Returning Errors
+
+Return errors for recoverable failures:
+
+```rust
+pub fn withdraw(env: Env, amount: i128) -> Result<(), Error> {
+    let balance = get_balance(&env);
+    
+    if amount > balance {
+        return Err(Error::InsufficientBalance);
+    }
+    
+    set_balance(&env, balance - amount);
+    Ok(())
+}
+```
+
+### Panic with Error
+
+Use `panic_with_error!` to immediately halt execution:
+
+```rust
+use soroban_sdk::panic_with_error;
+
+pub fn admin_only(env: Env, caller: Address) {
+    let admin = get_admin(&env);
+    
+    if caller != admin {
+        panic_with_error!(&env, Error::Unauthorized);
+    }
+    
+    // Continue with admin operations
+}
+```
+
+<Warning>
+  When a function panics (either with `panic!` or `panic_with_error!`), all storage changes are rolled back.
+</Warning>
+
+### Propagating Errors
+
+Use the `?` operator to propagate errors:
+
+```rust
+pub fn complex_operation(env: Env) -> Result<i128, Error> {
+    // Error automatically propagates if validate_input fails
+    validate_input(&env)?;
+    
+    // Error automatically propagates if process_data fails
+    let result = process_data(&env)?;
+    
+    Ok(result)
+}
+
+fn validate_input(env: &Env) -> Result<(), Error> {
+    // validation logic
+    Ok(())
+}
+
+fn process_data(env: &Env) -> Result<i128, Error> {
+    // processing logic
+    Ok(42)
+}
+```
+
+## Testing Errors
+
+Use `try_` prefixed methods to test error cases:
+
+<CodeGroup>
+
+```rust Testing Success
+#[test]
+fn test_success() {
+    let env = Env::default();
+    let contract_id = env.register(Contract, ());
+    let client = ContractClient::new(&env, &contract_id);
+
+    let result = client.try_hello(&Flag::A);
+    assert_eq!(result, Ok(Ok(symbol_short!("hello"))));
+}
+```
+
+```rust Testing Errors
+#[test]
+fn test_error() {
+    let env = Env::default();
+    let contract_id = env.register(Contract, ());
+    let client = ContractClient::new(&env, &contract_id);
+
+    let result = client.try_hello(&Flag::B);
+    assert_eq!(result, Err(Ok(Error::AnError)));
+}
+```
+
+```rust Testing Panics
+use soroban_sdk::InvokeError;
+
+#[test]
+fn test_panic() {
+    let env = Env::default();
+    let contract_id = env.register(Contract, ());
+    let client = ContractClient::new(&env, &contract_id);
+
+    let result = client.try_hello(&Flag::D);
+    assert_eq!(result, Err(Err(InvokeError::Abort)));
+}
+```
+
+</CodeGroup>
+
+### Testing Storage Rollback
+
+Verify that storage changes are rolled back on error:
+
+```rust
+#[test]
+fn test_rollback_on_error() {
+    let env = Env::default();
+    let contract_id = env.register(Contract, ());
+    let client = ContractClient::new(&env, &contract_id);
+
+    // This will fail and rollback storage changes
+    let _ = client.try_hello(&Flag::B);
+    
+    // Storage should not be persisted
+    assert!(!client.persisted());
+}
+
+#[test]
+fn test_persist_on_success() {
+    let env = Env::default();
+    let contract_id = env.register(Contract, ());
+    let client = ContractClient::new(&env, &contract_id);
+
+    // This succeeds
+    client.hello(&Flag::A);
+    
+    // Storage should be persisted
+    assert!(client.persisted());
+}
+```
+
+## Error Type Conversions
+
+Contract errors can be converted to and from other error types:
+
+```rust
+#[test]
+fn test_error_conversions() {
+    use soroban_sdk::{Error as SdkError, InvokeError};
+
+    // Contract Error -> InvokeError
+    let invoke_err: InvokeError = Error::AnError.into();
+    assert_eq!(invoke_err, InvokeError::Contract(1));
+
+    // InvokeError -> Contract Error
+    let result: Result<Error, InvokeError> = 
+        InvokeError::Contract(1).try_into();
+    assert_eq!(result, Ok(Error::AnError));
+
+    // Contract Error -> SDK Error
+    let sdk_err: SdkError = Error::AnError.into();
+    assert_eq!(sdk_err, SdkError::from_contract_error(1));
+
+    // SDK Error -> Contract Error
+    let result: Result<Error, SdkError> = 
+        SdkError::from_contract_error(1).try_into();
+    assert_eq!(result, Ok(Error::AnError));
+}
+```
+
+## InvokeError
+
+When calling other contracts, errors are returned as `InvokeError`:
+
+```rust
+use soroban_sdk::InvokeError;
+
+pub enum InvokeError {
+    // Contract panicked or host function failed
+    Abort,
+    // Contract returned a contract error
+    Contract(u32),
+}
+```
+
+Handle errors from other contracts:
+
+```rust
+pub fn call_other_contract(env: Env, contract: Address) -> Result<i128, Error> {
+    let client = OtherContractClient::new(&env, &contract);
+    
+    match client.try_some_function() {
+        Ok(value) => Ok(value),
+        Err(Ok(other_error)) => {
+            // Handle specific contract error
+            Err(Error::ExternalContractFailed)
+        },
+        Err(Err(InvokeError::Abort)) => {
+            // Handle abort/panic
+            Err(Error::ExternalContractPanicked)
+        },
+        Err(Err(InvokeError::Contract(code))) => {
+            // Handle unexpected contract error code
+            Err(Error::UnexpectedError)
+        }
+    }
+}
+```
+
+## Error Best Practices
+
+<AccordionGroup>
+  <Accordion title="Use descriptive error names">
+    ```rust
+    pub enum Error {
+        InsufficientBalance = 1,  // Good: clear meaning
+        Err1 = 1,                  // Bad: unclear
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="Start error codes at 1">
+    Error code 0 is reserved and should not be used.
+    ```rust
+    pub enum Error {
+        FirstError = 1,  // Good: starts at 1
+        SecondError = 2,
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="Document error conditions">
+    ```rust
+    pub enum Error {
+        /// Returned when the caller is not authorized to perform the action
+        Unauthorized = 1,
+        /// Returned when an account has insufficient balance for the operation
+        InsufficientBalance = 2,
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="Group related errors">
+    Use ranges for related errors:
+    ```rust
+    pub enum Error {
+        // Authentication errors (1-10)
+        Unauthorized = 1,
+        SessionExpired = 2,
+        
+        // Validation errors (11-20)
+        InvalidAmount = 11,
+        InvalidAddress = 12,
+        
+        // State errors (21-30)
+        AlreadyInitialized = 21,
+        NotInitialized = 22,
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="Test all error paths">
+    Write tests that exercise every error condition:
+    ```rust
+    #[test]
+    fn test_all_errors() {
+        test_unauthorized();
+        test_insufficient_balance();
+        test_invalid_amount();
+        // ... test each error variant
+    }
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Common Error Patterns
+
+### Authorization Errors
+
+```rust
+pub fn protected_action(env: Env, caller: Address) -> Result<(), Error> {
+    let admin = get_admin(&env);
+    
+    if caller != admin {
+        return Err(Error::Unauthorized);
+    }
+    
+    Ok(())
+}
+```
+
+### Validation Errors
+
+```rust
+pub fn set_price(env: Env, price: i128) -> Result<(), Error> {
+    if price <= 0 {
+        return Err(Error::InvalidPrice);
+    }
+    
+    if price > MAX_PRICE {
+        return Err(Error::PriceTooHigh);
+    }
+    
+    env.storage().persistent().set(&DataKey::Price, &price);
+    Ok(())
+}
+```
+
+### State Errors
+
+```rust
+pub fn initialize(env: Env, admin: Address) -> Result<(), Error> {
+    if env.storage().instance().has(&DataKey::Initialized) {
+        return Err(Error::AlreadyInitialized);
+    }
+    
+    env.storage().instance().set(&DataKey::Admin, &admin);
+    env.storage().instance().set(&DataKey::Initialized, &true);
+    Ok(())
+}
+```
+
+## Error vs Panic
+
+<Tabs>
+  <Tab title="Use Result<T, Error> when">
+    - The error is expected/recoverable
+    - Caller should handle the error
+    - You want to provide specific error information
+    - Multiple error conditions exist
+  </Tab>
+
+  <Tab title="Use panic! when">
+    - The error is unexpected/unrecoverable
+    - Contract invariants are violated
+    - Input validation fails catastrophically
+    - Should never happen in normal operation
+  </Tab>
+</Tabs>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Testing" icon="flask" href="/guides/testing">
+    Learn to test error handling
+  </Card>
+  <Card title="Custom Types" icon="shapes" href="/guides/custom-types">
+    Define custom types for your errors
+  </Card>
+</CardGroup>

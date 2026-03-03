@@ -1,0 +1,130 @@
+---
+title: Introduction to Soroban SDK
+description: Build powerful smart contracts on Stellar using the Soroban Rust SDK
+---
+
+<img
+  className="block dark:hidden"
+  src="/images/hero-light.svg"
+  alt="Soroban SDK Hero Light"
+/>
+<img
+  className="hidden dark:block"
+  src="/images/hero-dark.svg"
+  alt="Soroban SDK Hero Dark"
+/>
+
+## What is Soroban SDK?
+
+The Soroban SDK is a Rust framework for writing smart contracts on the Wasm-powered [Soroban](https://stellar.org/soroban) smart contract runtime, deployed on [Stellar](https://stellar.org).
+
+The SDK provides a comprehensive set of tools and libraries that make it easy to build, test, and deploy smart contracts with the full power of Rust's type safety and performance.
+
+## Key Features
+
+<CardGroup cols={2}>
+  <Card
+    title="Type-Safe Contracts"
+    icon="shield-check"
+  >
+    Build contracts with Rust's powerful type system ensuring safety and reliability at compile time
+  </Card>
+  <Card
+    title="Built-in Testing"
+    icon="vial"
+  >
+    Comprehensive testing utilities with `testutils` feature for simulating contract execution
+  </Card>
+  <Card
+    title="Storage Management"
+    icon="database"
+  >
+    Flexible storage options including persistent, temporary, and instance storage
+  </Card>
+  <Card
+    title="Event System"
+    icon="bell"
+  >
+    Rich event emission and tracking capabilities for contract interactions
+  </Card>
+</CardGroup>
+
+## Core Components
+
+The Soroban SDK consists of several key components:
+
+### Contract Macros
+
+Use `#[contract]` and `#[contractimpl]` to define your smart contract structure and implementation:
+
+```rust
+use soroban_sdk::{contract, contractimpl};
+
+#[contract]
+pub struct Contract;
+
+#[contractimpl]
+impl Contract {
+    pub fn hello(env: Env, to: Symbol) -> Vec<Symbol> {
+        vec![&env, symbol_short!("Hello"), to]
+    }
+}
+```
+
+### Environment Access
+
+The `Env` type provides access to the contract execution environment, including storage, events, authentication, and more.
+
+### Data Types
+
+The SDK provides Soroban-native types like `Symbol`, `Vec`, `Map`, `Address`, and custom types via `#[contracttype]`.
+
+<Note>
+  The Soroban SDK uses `#![no_std]` by default for WASM targets, ensuring minimal binary size and optimal performance.
+</Note>
+
+## Why Choose Soroban SDK?
+
+<CardGroup cols={3}>
+  <Card title="Performance" icon="bolt">
+    Compiled to WebAssembly for near-native execution speed
+  </Card>
+  <Card title="Security" icon="lock">
+    Rust's ownership model prevents common security vulnerabilities
+  </Card>
+  <Card title="Developer Experience" icon="code">
+    Rich tooling, comprehensive docs, and helpful error messages
+  </Card>
+</CardGroup>
+
+## Version Information
+
+- **Current Version**: 25.1.1
+- **Minimum Rust Version**: 1.84.0
+- **Target**: `wasm32v1-none`
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card
+    title="Installation"
+    icon="download"
+    href="/installation"
+  >
+    Set up your development environment and install the SDK
+  </Card>
+  <Card
+    title="Quickstart"
+    icon="rocket"
+    href="/quickstart"
+  >
+    Build your first smart contract in minutes
+  </Card>
+</CardGroup>
+
+## Additional Resources
+
+- [Official Documentation](https://docs.rs/soroban-sdk)
+- [Stellar Developers Portal](https://developers.stellar.org)
+- [GitHub Repository](https://github.com/stellar/rs-soroban-sdk)
+- [Example Contracts](https://developers.stellar.org/docs/build/smart-contracts/example-contracts)

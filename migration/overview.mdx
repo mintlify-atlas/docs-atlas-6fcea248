@@ -1,0 +1,327 @@
+---
+title: Migration Guide Overview
+description: Guide for migrating between versions of the Soroban Rust SDK
+---
+
+This guide helps you migrate your Soroban smart contracts between major versions of the Soroban Rust SDK.
+
+## Current Version
+
+The current version of the Soroban Rust SDK is **v25.1.1**.
+
+## Migration Paths
+
+Choose the migration path that matches your current SDK version:
+
+- [Migrating from v23 to v25](#migrating-from-v23-to-v25)
+- [Migrating from v22 to v23](#migrating-from-v22-to-v23)
+- [Migrating from v21 to v22](#migrating-from-v21-to-v22)
+- [Migrating from v20 to v21](#migrating-from-v20-to-v21)
+
+For a complete list of breaking changes, see the [Breaking Changes](/migration/breaking-changes) page.
+
+## Migrating from v23 to v25
+
+### 1. Events API Changes
+
+`Events::all()` return type changed from `Vec<(Address, Vec<Val>, Val)>` to `ContractEvents`. The new type supports the old comparison format for backward compatibility, but provides new features:
+
+- `filter_by_contract()` - Filter events by contract address
+- `to_xdr()` - XDR comparison support for cleaner assertions
+
+```rust
+// Old style still works
+assert_eq!(
+    env.events().all(),
+    vec![&env, (id.clone(), topics, data)]
+);
+
+// New recommended style
+assert_eq!(
+    env.events().all(),
+    std::vec![event.to_xdr(&env, &id)]
+);
+```
+
+### 2. BN254 Elliptic Curve Support
+
+Access BN254 (alt_bn128) cryptographic operations via `env.crypto().bn254()`:
+
+```rust
+let bn254 = env.crypto().bn254();
+let result = bn254.g1_add(&point1, &point2);
+let product = bn254.g1_mul(&point, &scalar);
+let valid = bn254.pairing_check(g1_points, g2_points);
+```
+
+New types:
+- `Bn254G1Affine` - G1 group points (64 bytes)
+- `Bn254G2Affine` - G2 group points (128 bytes)
+- `Fr` - Scalar field elements (32 bytes)
+- `Bn254Fp` - Base field elements (32 bytes)
+
+### 3. Poseidon Hash Functions
+
+Poseidon and Poseidon2 permutation functions are now available under the `hazmat-crypto` feature:
+
+```toml
+[dependencies]
+soroban-sdk = { version = "25", features = ["hazmat-crypto"] }
+```
+
+```rust
+let hazmat = CryptoHazmat::new(&env);
+let result = hazmat.poseidon_permutation(
+    &input,
+    Symbol::new(&env, "BN254"),
+    2,  // state width
+    5,  // s-box exponent
+    2,  // full rounds
+    1,  // partial rounds
+    &mds,
+    &round_constants,
+);
+```
+
+<Warning>
+  These are low-level cryptographic primitives. Use higher-level constructions when possible.
+</Warning>
+
+### 4. Contract Trait Macro
+
+The new `contracttrait` macro enables reusable contract interfaces with default implementations:
+
+```rust
+#[contracttrait]
+pub trait Pausable {
+    fn is_paused(env: &Env) -> bool {
+        env.storage().instance().has(&"paused")
+    }
+    
+    fn pause(env: &Env) {
+        env.storage().instance().set(&"paused", &true);
+    }
+}
+
+#[contract]
+pub struct MyContract;
+
+#[contractimpl(contracttrait)]
+impl Pausable for MyContract {}
+```
+
+The macro generates:
+- `{TraitName}Client` - Client for invoking trait functions
+- `{TraitName}Args` - Enum of function arguments
+- `{TraitName}Spec` - Contract specification
+
+### 5. Resource Limits Enforced by Default
+
+**Breaking Change**: `Env::default()` now enforces Mainnet resource limits in tests. Tests will fail if limits are exceeded.
+
+This change provides early warning for contracts that may be too resource-heavy for Mainnet.
+
+```rust
+// Tests now fail if resource limits exceeded
+let env = Env::default();
+```
+
+**If your tests fail after upgrading**, you can temporarily opt-out:
+
+```rust
+let env = Env::default();
+env.cost_estimate().disable_resource_limits();
+```
+
+You can also set custom limits:
+
+```rust
+use soroban_env_host::InvocationResourceLimits;
+
+let env = Env::default();
+let mut limits = InvocationResourceLimits::mainnet();
+limits.instructions = 100_000_000;
+env.cost_estimate().enforce_resource_limits(limits);
+```
+
+## Migrating from v22 to v23
+
+### 1. Event Publishing with `contractevent`
+
+Replace `Events::publish` with the type-safe `contractevent` macro:
+
+```rust
+// Old approach
+env.events().publish(
+    (symbol_short!("increment"), &addr),
+    Map::from_array(&env, [(symbol_short!("count"), count.into())])
+);
+
+// New approach
+#[contractevent]
+pub struct Increment {
+    #[topic]
+    addr: Address,
+    count: u32,
+}
+
+Increment { addr: addr.clone(), count }.publish(&env);
+```
+
+### 2. Token Transfer MuxedAddress
+
+Token interface now uses `MuxedAddress` instead of `Address` for the `to` parameter. This change is specific to `soroban-token-sdk`.
+
+`MuxedAddress` is backward compatible - contracts accepting `MuxedAddress` can still receive `Address` arguments.
+
+```rust
+// Updated signature
+fn transfer(env: Env, from: Address, muxed_to: MuxedAddress, amount: i128) {
+    from.require_auth();
+    let to = muxed_to.address();
+    token_impl::move_balance(&env, &from, &to, amount);
+}
+```
+
+### 3. Archived Entry Testing
+
+Accessing archived persistent entries in tests no longer panics. The SDK now emulates automatic restoration instead.
+
+```rust
+// In v22: This would error
+client.create_and_extend_entry();
+env.ledger().set_sequence_number(current_ledger + 1_000_000 + 1);
+let res = client.try_read_entry(); // Error in v22
+
+// In v23: Entry is automatically restored
+let res = client.try_read_entry(); // Ok(value)
+```
+
+**Best practice**: Verify TTL explicitly instead of relying on archived entry errors:
+
+```rust
+env.as_contract(&contract, || {
+    assert_eq!(env.storage().persistent().get_ttl(&DataKey::Key), 1_000_000);
+});
+```
+
+## Migrating from v21 to v22
+
+### 1. Contract Registration API
+
+`Env::register` and `Env::register_at` replace `Env::register_contract` and `Env::register_contract_wasm`.
+
+Both native contracts and Wasm contracts now use the same registration methods:
+
+```rust
+// Old API
+let address = env.register_contract(Contract);
+let address = env.register_contract_wasm(wasm_bytes);
+
+// New API
+let address = env.register(
+    Contract,  // or wasm_bytes
+    (),        // constructor arguments
+);
+
+let address = Address::generate(&env);
+env.register_at(
+    &address,  // specific address
+    Contract,  // or wasm_bytes
+    (),        // constructor arguments
+);
+```
+
+### 2. Contract Deployment API
+
+`DeployerWithAddress::deploy_v2` replaces `DeployerWithAddress::deploy`.
+
+The new method accepts constructor arguments:
+
+```rust
+// Old API
+let contract_address = deployer.deploy(wasm_hash);
+
+// New API
+let contract_address = deployer.deploy_v2(
+    wasm_hash,
+    (),  // constructor arguments or ()
+);
+```
+
+### 3. Fuzz Testing Changes
+
+`fuzz_catch_panic` is deprecated. Use `try_` client functions instead:
+
+```rust
+fuzz_target!(|input: Input| {
+    let env = Env::default();
+    let id = env.register(Contract, ());
+    let client = ContractClient::new(&env, &id);
+    
+    let result = client.try_add(&input.x, &input.y);
+    match result {
+        Ok(Ok(_)) => {},        // Success, expected type
+        Ok(Err(_)) => panic!("unexpected type"),
+        Err(Ok(_)) => {},       // Error from contract
+        Err(Err(_)) => panic!("unexpected error"),
+    }
+});
+```
+
+### 4. Test Snapshot Changes
+
+Diagnostic events no longer appear in test snapshots. Only contract events and system events are included.
+
+This will cause all test snapshot JSON files to change when upgrading. The changes should be isolated to events.
+
+## Migrating from v20 to v21
+
+### CustomAccountInterface Signature Changes
+
+The `__check_auth` function's `signature_payload` parameter changed from `BytesN<32>` to `Hash<32>`.
+
+```rust
+// Old signature
+fn __check_auth(
+    env: Env,
+    signature_payload: BytesN<32>,
+    signatures: (),
+    auth_contexts: Vec<Context>,
+) -> Result<(), Self::Error>
+
+// New signature
+fn __check_auth(
+    env: Env,
+    signature_payload: Hash<32>,
+    signatures: (),
+    auth_contexts: Vec<Context>,
+) -> Result<(), Self::Error>
+```
+
+The types are interchangeable. Convert from `Hash<32>` to `BytesN<32>` using `Hash<32>::to_bytes()` or `Into::into()`.
+
+## Getting Help
+
+If you encounter issues during migration:
+
+- Check the [Breaking Changes](/migration/breaking-changes) page for detailed information
+- Review the [API documentation](https://docs.rs/soroban-sdk)
+- Visit the [Soroban Discord](https://discord.gg/stellardev)
+- File issues on [GitHub](https://github.com/stellar/rs-soroban-sdk)
+
+## Version Requirements
+
+Minimum Rust version: **1.84.0**
+
+To check your Rust version:
+
+```bash
+rustc --version
+```
+
+To update Rust:
+
+```bash
+rustup update
+```

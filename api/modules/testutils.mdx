@@ -1,0 +1,568 @@
+---
+title: "testutils"
+description: "Testing utilities for Soroban smart contracts"
+---
+
+The `testutils` module provides utilities for testing Soroban smart contracts, including test environment manipulation, snapshot management, and event inspection.
+
+<Note>
+This module is only available when the `testutils` feature is enabled.
+</Note>
+
+## Overview
+
+The testutils module enables comprehensive testing of smart contracts by providing:
+- Environment state manipulation (ledger, storage, events)
+- Mock authentication and authorization
+- Snapshot-based testing
+- Budget and cost tracking
+- Address and key generation
+
+## Traits
+
+### Register
+
+Register contracts for testing.
+
+```rust
+pub trait Register {
+    fn register<'i, I, A>(self, env: &Env, id: I, args: A) -> Address
+    where
+        I: Into<Option<&'i Address>>,
+        A: ConstructorArgs;
+}
+```
+
+**Example:**
+```rust
+use soroban_sdk::{Env, testutils::Register};
+
+#[test]
+fn test_contract() {
+    let env = Env::default();
+    
+    // Register with generated address
+    let contract_id = Contract.register(&env, None, ());
+    
+    // Register with specific address
+    let address = Address::generate(&env);
+    let contract_id = Contract.register(&env, Some(&address), ());
+}
+```
+
+### Ledger
+
+Test utilities for ledger state manipulation.
+
+```rust
+pub trait Ledger {
+    fn set(&self, ledger_info: LedgerInfo);
+    fn set_sequence_number(&self, sequence_number: u32);
+    fn set_timestamp(&self, timestamp: u64);
+    fn set_network_id(&self, network_id: [u8; 32]);
+    // ... more methods
+}
+```
+
+**Example:**
+```rust
+use soroban_sdk::{Env, testutils::Ledger};
+
+#[test]
+fn test_time_based_logic() {
+    let env = Env::default();
+    
+    // Set ledger timestamp
+    env.ledger().set_timestamp(1234567890);
+    
+    // Set sequence number
+    env.ledger().set_sequence_number(100);
+    
+    // Test contract
+    let contract_id = env.register(Contract, ());
+    let client = ContractClient::new(&env, &contract_id);
+    client.time_sensitive_function();
+}
+```
+
+### Events
+
+Test utilities for inspecting contract events.
+
+```rust
+pub trait Events {
+    fn all(&self) -> ContractEvents;
+}
+```
+
+**Example:**
+```rust
+use soroban_sdk::{Env, testutils::Events};
+
+#[test]
+fn test_events() {
+    let env = Env::default();
+    let contract_id = env.register(Contract, ());
+    let client = ContractClient::new(&env, &contract_id);
+    
+    // Call function that emits events
+    client.transfer(&from, &to, &100);
+    
+    // Get all events
+    let events = env.events().all();
+    assert_eq!(events.len(), 1);
+    
+    // Filter by contract
+    let contract_events = events.filter_by_contract(&contract_id);
+}
+```
+
+### Logs
+
+Test utilities for inspecting diagnostic logs.
+
+```rust
+pub trait Logs {
+    fn all(&self) -> Vec<String>;
+    fn print(&self);
+}
+```
+
+**Example:**
+```rust
+use soroban_sdk::{Env, testutils::Logs};
+
+#[test]
+fn test_with_logs() {
+    let env = Env::default();
+    let contract_id = env.register(Contract, ());
+    let client = ContractClient::new(&env, &contract_id);
+    
+    client.function_that_logs();
+    
+    // Print all logs
+    env.logs().print();
+    
+    // Get logs as vector
+    let logs = env.logs().all();
+    assert!(logs.contains(&"Expected log message".to_string()));
+}
+```
+
+### Address
+
+Generate test addresses.
+
+```rust
+pub trait Address {
+    fn generate(env: &Env) -> crate::Address;
+}
+```
+
+**Example:**
+```rust
+use soroban_sdk::{Env, Address, testutils::Address as _};
+
+#[test]
+fn test_with_addresses() {
+    let env = Env::default();
+    
+    let user1 = Address::generate(&env);
+    let user2 = Address::generate(&env);
+    let user3 = Address::generate(&env);
+    
+    // Use addresses in tests
+}
+```
+
+### MuxedAddress
+
+Generate test muxed addresses.
+
+```rust
+pub trait MuxedAddress {
+    fn generate(env: &Env) -> crate::MuxedAddress;
+    fn new<T: Into<crate::MuxedAddress>>(address: T, id: u64) -> crate::MuxedAddress;
+}
+```
+
+**Example:**
+```rust
+use soroban_sdk::{Env, MuxedAddress, testutils::MuxedAddress as _};
+
+#[test]
+fn test_muxed_addresses() {
+    let env = Env::default();
+    
+    // Generate random muxed address
+    let muxed = MuxedAddress::generate(&env);
+    
+    // Create with specific ID
+    let muxed2 = MuxedAddress::new(muxed.clone(), 42);
+}
+```
+
+### BytesN
+
+Generate random bytes for testing.
+
+```rust
+pub trait BytesN<const N: usize> {
+    fn random(env: &Env) -> crate::BytesN<N>;
+}
+```
+
+**Example:**
+```rust
+use soroban_sdk::{Env, BytesN, testutils::BytesN as _};
+
+#[test]
+fn test_with_random_bytes() {
+    let env = Env::default();
+    
+    let random_hash: BytesN<32> = BytesN::random(&env);
+    let random_signature: BytesN<64> = BytesN::random(&env);
+}
+```
+
+### Deployer
+
+Test utilities for contract deployment.
+
+```rust
+pub trait Deployer {
+    fn get_contract_instance_ttl(&self, contract: &Address) -> u32;
+    fn get_contract_code_ttl(&self, contract: &Address) -> u32;
+}
+```
+
+**Example:**
+```rust
+use soroban_sdk::{Env, testutils::Deployer};
+
+#[test]
+fn test_ttl() {
+    let env = Env::default();
+    let contract_id = env.register(Contract, ());
+    
+    let instance_ttl = env.deployer().get_contract_instance_ttl(&contract_id);
+    let code_ttl = env.deployer().get_contract_code_ttl(&contract_id);
+    
+    assert!(instance_ttl > 0);
+}
+```
+
+## Types
+
+### LedgerInfo
+
+Complete ledger information for testing.
+
+```rust
+pub struct LedgerInfo {
+    pub protocol_version: u32,
+    pub sequence_number: u32,
+    pub timestamp: u64,
+    pub network_id: [u8; 32],
+    pub base_reserve: u32,
+    pub min_temp_entry_ttl: u32,
+    pub min_persistent_entry_ttl: u32,
+    pub max_entry_ttl: u32,
+}
+```
+
+### ContractEvents
+
+Collection of contract events for testing.
+
+```rust
+pub struct ContractEvents {
+    // ...
+}
+```
+
+**Methods:**
+- `events() -> &[ContractEvent]` - Get events in XDR form
+- `filter_by_contract(&self, addr: &Address) -> Self` - Filter by contract address
+
+### Snapshot
+
+Complete environment snapshot for testing.
+
+```rust
+pub struct Snapshot {
+    pub generators: Generators,
+    pub auth: AuthSnapshot,
+    pub ledger: LedgerSnapshot,
+    pub events: EventsSnapshot,
+}
+```
+
+**Methods:**
+- `read(r: impl Read) -> Result<Snapshot, Error>` - Read snapshot from reader
+- `read_file(p: impl AsRef<Path>) -> Result<Snapshot, Error>` - Read from file
+- `write(&self, w: impl Write) -> Result<(), Error>` - Write to writer
+- `write_file(&self, p: impl AsRef<Path>) -> Result<(), Error>` - Write to file
+
+### Budget
+
+Budget tracking for resource consumption.
+
+```rust
+pub struct Budget(/* ... */);
+```
+
+**Methods:**
+- `reset_default(&mut self)` - Reset to default limits
+- `reset_unlimited(&mut self)` - Reset with no limits
+- `reset_limits(&mut self, cpu: u64, mem: u64)` - Reset with custom limits
+- `cpu_instruction_cost(&self) -> u64` - Get CPU instruction cost
+- `memory_bytes_cost(&self) -> u64` - Get memory cost
+- `tracker(&self, cost_type: ContractCostType) -> CostTracker` - Get cost tracker
+- `print(&self)` - Print budget information
+
+**Example:**
+```rust
+use soroban_sdk::{Env, testutils::budget::Budget};
+
+#[test]
+fn test_budget() {
+    let env = Env::default();
+    
+    env.cost_estimate().budget().reset_default();
+    
+    let contract_id = env.register(Contract, ());
+    let client = ContractClient::new(&env, &contract_id);
+    
+    // Run expensive operation
+    client.complex_function();
+    
+    // Check costs
+    let cpu_cost = env.cost_estimate().budget().cpu_instruction_cost();
+    let mem_cost = env.cost_estimate().budget().memory_bytes_cost();
+    
+    println!("CPU: {}, Memory: {}", cpu_cost, mem_cost);
+}
+```
+
+## Mock Authentication
+
+### MockAuth
+
+Mock authentication for testing.
+
+```rust
+pub trait MockAuth<T> {
+    fn mock_auths(&self, f: impl FnOnce()) -> T;
+    fn mock_all_auths(&self, f: impl FnOnce()) -> T;
+}
+```
+
+**Example:**
+```rust
+use soroban_sdk::{Env, Address, testutils::{Address as _, MockAuth}};
+
+#[test]
+fn test_with_mock_auth() {
+    let env = Env::default();
+    let contract_id = env.register(Contract, ());
+    let client = ContractClient::new(&env, &contract_id);
+    
+    let user = Address::generate(&env);
+    
+    // Mock authentication for user
+    env.mock_all_auths();
+    
+    // This will succeed even without real signatures
+    client.requires_auth_function(&user, &100);
+}
+```
+
+### AuthorizedInvocation
+
+Represents an authorized invocation for verification.
+
+```rust
+pub struct AuthorizedInvocation {
+    // ...
+}
+```
+
+## Stellar Asset Testing
+
+### StellarAssetContract
+
+Test utilities for Stellar Asset Contracts.
+
+```rust
+pub struct StellarAssetContract {
+    // ...
+}
+```
+
+**Methods:**
+- `address(&self) -> Address` - Get contract address
+- `issuer(&self) -> StellarAssetIssuer` - Get issuer
+
+### StellarAssetIssuer
+
+Manage issuer state for testing.
+
+```rust
+pub struct StellarAssetIssuer {
+    // ...
+}
+```
+
+**Methods:**
+- `flags(&self) -> u32` - Get issuer flags
+- `set_flag(&self, flag: IssuerFlags)` - Set a flag
+- `clear_flag(&self, flag: IssuerFlags)` - Clear a flag
+- `address(&self) -> Address` - Get issuer address
+
+## Snapshot Testing
+
+### SnapshotSource
+
+Provide custom ledger data sources for testing.
+
+```rust
+pub trait SnapshotSource {
+    fn get(
+        &self,
+        key: &Rc<LedgerKey>
+    ) -> Result<Option<(Rc<LedgerEntry>, Option<u32>)>, HostError>;
+}
+```
+
+### SnapshotSourceInput
+
+Input for creating environment from snapshot source.
+
+```rust
+pub struct SnapshotSourceInput {
+    pub source: Rc<dyn SnapshotSource>,
+    pub ledger_info: Option<LedgerInfo>,
+    pub snapshot: Option<Rc<LedgerSnapshot>>,
+}
+```
+
+**Example:**
+```rust
+use soroban_sdk::{Env, testutils::{SnapshotSource, SnapshotSourceInput}};
+use std::rc::Rc;
+
+struct CustomSource;
+
+impl SnapshotSource for CustomSource {
+    fn get(
+        &self,
+        key: &Rc<LedgerKey>
+    ) -> Result<Option<(Rc<LedgerEntry>, Option<u32>)>, HostError> {
+        Ok(None)
+    }
+}
+
+#[test]
+fn test_with_custom_source() {
+    let input = SnapshotSourceInput {
+        source: Rc::new(CustomSource),
+        ledger_info: None,
+        snapshot: None,
+    };
+    
+    let env = Env::from_ledger_snapshot(input);
+    // Use env for testing
+}
+```
+
+## EnvTestConfig
+
+Configuration for test environments.
+
+```rust
+pub struct EnvTestConfig {
+    // ...
+}
+```
+
+Use with `Env::from_ledger_snapshot_with_config` for advanced test setup.
+
+## Examples
+
+### Complete Test Example
+
+```rust
+use soroban_sdk::{
+    contract, contractimpl, Env, Address, Symbol,
+    testutils::{Address as _, Ledger, Events, MockAuth}
+};
+
+#[contract]
+pub struct Counter;
+
+#[contractimpl]
+impl Counter {
+    pub fn increment(env: Env, user: Address) -> u32 {
+        user.require_auth();
+        
+        let key = Symbol::new(&env, "count");
+        let mut count: u32 = env.storage().instance()
+            .get(&key)
+            .unwrap_or(0);
+        
+        count += 1;
+        env.storage().instance().set(&key, &count);
+        
+        env.events().publish((Symbol::new(&env, "increment"), user), count);
+        
+        count
+    }
+}
+
+#[test]
+fn test_increment() {
+    let env = Env::default();
+    
+    // Set ledger state
+    env.ledger().set_timestamp(1234567890);
+    env.ledger().set_sequence_number(100);
+    
+    // Register contract
+    let contract_id = env.register(Counter, ());
+    let client = CounterClient::new(&env, &contract_id);
+    
+    // Generate test address
+    let user = Address::generate(&env);
+    
+    // Mock authentication
+    env.mock_all_auths();
+    
+    // Call contract
+    let result = client.increment(&user);
+    assert_eq!(result, 1);
+    
+    // Verify events
+    let events = env.events().all();
+    assert_eq!(events.len(), 1);
+    
+    // Check budget
+    let cpu_cost = env.cost_estimate().budget().cpu_instruction_cost();
+    println!("CPU cost: {}", cpu_cost);
+}
+```
+
+## Best Practices
+
+1. **Use mock auth**: Use `mock_all_auths()` for testing without real signatures
+2. **Set ledger state**: Always set appropriate ledger state for time-dependent tests
+3. **Verify events**: Check that expected events are emitted
+4. **Track costs**: Monitor resource consumption with budget tracking
+5. **Generate addresses**: Use `Address::generate()` for unique test addresses
+6. **Use snapshots**: Leverage snapshots for consistent test state
+
+## See Also
+
+- [Env](/api/types/env) - Environment type with test configuration
+- [Address](/api/types/address) - Address type with test utilities
+- [auth](/api/modules/auth) - For authentication and authorization

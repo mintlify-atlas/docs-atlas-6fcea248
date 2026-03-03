@@ -1,0 +1,421 @@
+---
+title: 'Persistent Storage'
+description: 'API reference for Soroban persistent storage operations'
+---
+
+## Overview
+
+Persistent storage is designed for data that must remain available indefinitely and be recoverable after expiration. Access persistent storage via `env.storage().persistent()`.
+
+**Key Properties:**
+- More expensive than temporary storage
+- Expired entries move to Expired State Stack (ESS) for recovery
+- Only one version can exist at a time (cannot recreate while expired version exists)
+- Best for critical data: token balances, ownership records, user profiles
+
+## Type Definition
+
+```rust
+pub struct Persistent {
+    storage: Storage,
+}
+```
+
+Access through the `Storage` type:
+
+```rust
+let persistent = env.storage().persistent();
+```
+
+## Methods
+
+### has
+
+Checks if a value exists for the given key.
+
+```rust
+pub fn has<K>(&self, key: &K) -> bool
+where
+    K: IntoVal<Env, Val>,
+```
+
+**Parameters:**
+- `key`: The key to check
+
+**Returns:** `true` if a value exists, `false` otherwise
+
+**Example:**
+```rust
+use soroban_sdk::{contract, contractimpl, Env, symbol_short};
+
+#[contract]
+pub struct Contract;
+
+#[contractimpl]
+impl Contract {
+    pub fn check_balance(env: Env, user: Address) -> bool {
+        let key = symbol_short!("balance");
+        env.storage().persistent().has(&key)
+    }
+}
+```
+
+---
+
+### get
+
+Retrieves a value for the given key.
+
+```rust
+pub fn get<K, V>(&self, key: &K) -> Option<V>
+where
+    V::Error: Debug,
+    K: IntoVal<Env, Val>,
+    V: TryFromVal<Env, Val>,
+```
+
+**Parameters:**
+- `key`: The key to retrieve
+
+**Returns:** `Some(V)` if the value exists, `None` otherwise
+
+**Panics:** If the stored value cannot be converted to type `V`
+
+**Example:**
+```rust
+use soroban_sdk::{contract, contractimpl, Env, Address, symbol_short};
+
+#[contract]
+pub struct TokenContract;
+
+#[contractimpl]
+impl TokenContract {
+    pub fn get_balance(env: Env, user: Address) -> i128 {
+        let key = symbol_short!("balance");
+        env.storage()
+            .persistent()
+            .get::<_, i128>(&key)
+            .unwrap_or(0)
+    }
+}
+```
+
+---
+
+### set
+
+Stores a value for the given key.
+
+```rust
+pub fn set<K, V>(&self, key: &K, val: &V)
+where
+    K: IntoVal<Env, Val>,
+    V: IntoVal<Env, Val>,
+```
+
+**Parameters:**
+- `key`: The key to store under
+- `val`: The value to store
+
+**Example:**
+```rust
+use soroban_sdk::{contract, contractimpl, Env, Address, symbol_short};
+
+#[contract]
+pub struct TokenContract;
+
+#[contractimpl]
+impl TokenContract {
+    pub fn set_balance(env: Env, user: Address, amount: i128) {
+        let key = symbol_short!("balance");
+        env.storage().persistent().set(&key, &amount);
+        
+        // Extend TTL to ensure balance persists
+        env.storage().persistent().extend_ttl(&key, 100, 1000);
+    }
+}
+```
+
+---
+
+### update
+
+Updates a value by applying a function to the current value.
+
+```rust
+pub fn update<K, V>(&self, key: &K, f: impl FnOnce(Option<V>) -> V) -> V
+where
+    K: IntoVal<Env, Val>,
+    V: IntoVal<Env, Val>,
+    V: TryFromVal<Env, Val>,
+```
+
+**Parameters:**
+- `key`: The key to update
+- `f`: Function that receives current value (or `None`) and returns new value
+
+**Returns:** The new value after update
+
+**Example:**
+```rust
+use soroban_sdk::{contract, contractimpl, Env, Address, symbol_short};
+
+#[contract]
+pub struct Counter;
+
+#[contractimpl]
+impl Counter {
+    pub fn increment(env: Env) -> u32 {
+        let key = symbol_short!("count");
+        env.storage().persistent().update(&key, |count: Option<u32>| {
+            count.unwrap_or(0) + 1
+        })
+    }
+}
+```
+
+---
+
+### try_update
+
+Updates a value by applying a fallible function.
+
+```rust
+pub fn try_update<K, V, E>(
+    &self,
+    key: &K,
+    f: impl FnOnce(Option<V>) -> Result<V, E>,
+) -> Result<V, E>
+where
+    K: IntoVal<Env, Val>,
+    V: IntoVal<Env, Val>,
+    V: TryFromVal<Env, Val>,
+```
+
+**Parameters:**
+- `key`: The key to update
+- `f`: Fallible function that receives current value and returns `Result<V, E>`
+
+**Returns:** `Ok(V)` with the new value, or `Err(E)` if the function fails
+
+**Example:**
+```rust
+use soroban_sdk::{contract, contractimpl, contracterror, Env, Address, symbol_short};
+
+#[contracterror]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum Error {
+    InsufficientBalance = 1,
+}
+
+#[contract]
+pub struct TokenContract;
+
+#[contractimpl]
+impl TokenContract {
+    pub fn transfer(env: Env, from: Address, amount: i128) -> Result<(), Error> {
+        let key = symbol_short!("balance");
+        env.storage().persistent().try_update(&key, |balance: Option<i128>| {
+            let current = balance.unwrap_or(0);
+            if current < amount {
+                Err(Error::InsufficientBalance)
+            } else {
+                Ok(current - amount)
+            }
+        })?;
+        Ok(())
+    }
+}
+```
+
+---
+
+### extend_ttl
+
+Extends the time-to-live for a storage entry.
+
+```rust
+pub fn extend_ttl<K>(&self, key: &K, threshold: u32, extend_to: u32)
+where
+    K: IntoVal<Env, Val>,
+```
+
+**Parameters:**
+- `key`: The storage key to extend
+- `threshold`: Only extend if TTL is below this value (in ledgers)
+- `extend_to`: New TTL value when extended (in ledgers)
+
+**Behavior:**
+- Only extends TTL if current TTL < threshold
+- Sets TTL to `extend_to` ledgers from current ledger
+- No-op if TTL >= threshold (prevents unnecessary operations)
+
+**Example:**
+```rust
+use soroban_sdk::{contract, contractimpl, Env, Address, symbol_short};
+
+#[contract]
+pub struct TokenContract;
+
+#[contractimpl]
+impl TokenContract {
+    pub fn bump_balance(env: Env, user: Address) {
+        let key = symbol_short!("balance");
+        
+        // Extend if TTL drops below 100 ledgers
+        // Extend to 1000 ledgers when triggered
+        env.storage().persistent().extend_ttl(&key, 100, 1000);
+    }
+    
+    pub fn transfer(env: Env, from: Address, to: Address, amount: i128) {
+        // Extend TTL on every access
+        let from_key = symbol_short!("from_bal");
+        let to_key = symbol_short!("to_bal");
+        
+        env.storage().persistent().extend_ttl(&from_key, 100, 1000);
+        env.storage().persistent().extend_ttl(&to_key, 100, 1000);
+        
+        // ... transfer logic
+    }
+}
+```
+
+**Best Practices:**
+- Set `threshold` to allow time for extension before expiration
+- Set `extend_to` considering access patterns and costs
+- Extend TTL on every write or read for critical data
+- Use higher `extend_to` values for frequently accessed data
+
+---
+
+### remove
+
+Removes a key and its value from storage.
+
+```rust
+pub fn remove<K>(&self, key: &K)
+where
+    K: IntoVal<Env, Val>,
+```
+
+**Parameters:**
+- `key`: The key to remove
+
+**Behavior:** No-op if the key doesn't exist
+
+**Example:**
+```rust
+use soroban_sdk::{contract, contractimpl, Env, Address, symbol_short};
+
+#[contract]
+pub struct Contract;
+
+#[contractimpl]
+impl Contract {
+    pub fn close_account(env: Env, user: Address) {
+        let key = symbol_short!("balance");
+        env.storage().persistent().remove(&key);
+    }
+}
+```
+
+## Complete Example
+
+Here's a complete token contract demonstrating persistent storage usage:
+
+```rust
+use soroban_sdk::{
+    contract, contractimpl, contracterror, Env, Address, symbol_short
+};
+
+#[contracterror]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum Error {
+    InsufficientBalance = 1,
+}
+
+#[contract]
+pub struct TokenContract;
+
+#[contractimpl]
+impl TokenContract {
+    pub fn transfer(
+        env: Env,
+        from: Address,
+        to: Address,
+        amount: i128,
+    ) -> Result<(), Error> {
+        from.require_auth();
+        
+        let storage = env.storage().persistent();
+        
+        // Deduct from sender
+        let from_key = symbol_short!("from_bal");
+        let new_from_balance = storage.try_update(&from_key, |balance: Option<i128>| {
+            let current = balance.unwrap_or(0);
+            if current < amount {
+                Err(Error::InsufficientBalance)
+            } else {
+                Ok(current - amount)
+            }
+        })?;
+        
+        // Add to receiver
+        let to_key = symbol_short!("to_bal");
+        storage.update(&to_key, |balance: Option<i128>| {
+            balance.unwrap_or(0) + amount
+        });
+        
+        // Extend TTL for both accounts
+        // Extend if TTL < 100 ledgers, set to 1000 ledgers
+        storage.extend_ttl(&from_key, 100, 1000);
+        storage.extend_ttl(&to_key, 100, 1000);
+        
+        Ok(())
+    }
+    
+    pub fn balance(env: Env, account: Address) -> i128 {
+        let key = symbol_short!("balance");
+        env.storage()
+            .persistent()
+            .get(&key)
+            .unwrap_or(0)
+    }
+}
+```
+
+## Test Utilities
+
+When the `testutils` feature is enabled, additional methods are available:
+
+```rust
+#[cfg(test)]
+mod test {
+    use soroban_sdk::{Env, symbol_short, testutils::storage::Persistent};
+    
+    #[test]
+    fn test_storage() {
+        let env = Env::default();
+        let storage = env.storage().persistent();
+        
+        // Get all persistent storage entries
+        let all_data = storage.all();
+        
+        // Get TTL for a specific key
+        let key = symbol_short!("balance");
+        let ttl = storage.get_ttl(&key);
+        
+        assert!(ttl > 0);
+    }
+}
+```
+
+## See Also
+
+- [Storage Overview](/api/storage/overview) - Overview of all storage types
+- [Temporary Storage](/api/storage/temporary) - Lower-cost temporary storage
+- [Instance Storage](/api/storage/instance) - Contract instance storage
+
+## Source Reference
+
+Implementation: `soroban-sdk/src/storage.rs:301-388`

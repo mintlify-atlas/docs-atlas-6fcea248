@@ -1,0 +1,388 @@
+---
+title: Map<K, V>
+description: API reference for Map<K, V>, an ordered key-value dictionary in Soroban Rust SDK
+---
+
+# Map\<K, V\>
+
+Map is an ordered key-value dictionary.
+
+The map is ordered by its keys. Iterating a map is stable and always returns the keys and values in order of the keys.
+
+The map is stored in the Host and available to the Guest through the functions defined on Map. Values stored in the Map are transmitted to the Host as `Val`s, and when retrieved from the Map are transmitted back and converted from `Val` back into their type.
+
+## Type Safety
+
+The pairs of keys and values in a Map are not guaranteed to be of type `K`/`V` and conversion will fail if they are not. Most functions on Map return a `Result` due to this.
+
+Maps have at most one entry per key. Setting a value for a key in the map that already has a value for that key replaces the value.
+
+## Constructor Methods
+
+### `new`
+
+```rust
+pub fn new(env: &Env) -> Map<K, V>
+```
+
+Create an empty Map.
+
+**Example:**
+```rust
+use soroban_sdk::{Env, Map};
+
+let env = Env::default();
+let map = Map::<i32, i32>::new(&env);
+assert_eq!(map.len(), 0);
+```
+
+### `from_array`
+
+```rust
+pub fn from_array<const N: usize>(env: &Env, items: [(K, V); N]) -> Map<K, V>
+```
+
+Create a Map from the key-value pairs in the array.
+
+**Example:**
+```rust
+use soroban_sdk::{Env, Map};
+
+let env = Env::default();
+let map = Map::from_array(&env, [(1, 10), (2, 20)]);
+assert_eq!(map.len(), 2);
+```
+
+## Key Operations
+
+### `contains_key`
+
+```rust
+pub fn contains_key(&self, k: K) -> bool
+```
+
+Returns true if a key-value pair exists in the map with the given key.
+
+### `get`
+
+```rust
+pub fn get(&self, k: K) -> Option<V>
+```
+
+Returns the value corresponding to the key or None if the map does not contain a value with the specified key.
+
+**Panics:** If the value corresponding to the key cannot be converted to type V.
+
+### `try_get`
+
+```rust
+pub fn try_get(&self, k: K) -> Result<Option<V>, V::Error>
+```
+
+Returns the value corresponding to the key or None if the map does not contain a value with the specified key.
+
+**Errors:** If the value corresponding to the key cannot be converted to type V.
+
+### `get_unchecked`
+
+```rust
+pub fn get_unchecked(&self, k: K) -> V
+```
+
+Returns the value corresponding to the key.
+
+**Panics:** 
+- If the map does not contain a value with the specified key.
+- If the value corresponding to the key cannot be converted to type V.
+
+### `try_get_unchecked`
+
+```rust
+pub fn try_get_unchecked(&self, k: K) -> Result<V, V::Error>
+```
+
+Returns the value corresponding to the key.
+
+**Errors:** If the value corresponding to the key cannot be converted to type V.
+
+**Panics:** If the map does not contain a value with the specified key.
+
+## Modification Methods
+
+### `set`
+
+```rust
+pub fn set(&mut self, k: K, v: V)
+```
+
+Set the value for the specified key.
+
+If the map contains a value corresponding to the key, the value is replaced with the given value.
+
+**Example:**
+```rust
+use soroban_sdk::{Env, Map};
+
+let env = Env::default();
+let mut map = Map::new(&env);
+map.set(1, 10);
+map.set(2, 20);
+assert_eq!(map.len(), 2);
+```
+
+### `remove`
+
+```rust
+pub fn remove(&mut self, k: K) -> Option<()>
+```
+
+Remove the value corresponding to the key.
+
+Returns `None` if the map does not contain a value with the specified key.
+
+### `remove_unchecked`
+
+```rust
+pub fn remove_unchecked(&mut self, k: K)
+```
+
+Remove the value corresponding to the key.
+
+**Panics:** If the map does not contain a value with the specified key.
+
+## Collection Methods
+
+### `keys`
+
+```rust
+pub fn keys(&self) -> Vec<K>
+```
+
+Returns a Vec of all keys in the map.
+
+**Example:**
+```rust
+use soroban_sdk::{Env, Map, map, vec};
+
+let env = Env::default();
+let map = map![&env, (0, 0), (1, 10), (2, 20)];
+let keys = map.keys();
+assert_eq!(keys, vec![&env, 0, 1, 2]);
+```
+
+### `values`
+
+```rust
+pub fn values(&self) -> Vec<V>
+```
+
+Returns a Vec of all values in the map.
+
+**Example:**
+```rust
+use soroban_sdk::{Env, Map, map, vec};
+
+let env = Env::default();
+let map = map![&env, (0, 0), (1, 10), (2, 20)];
+let values = map.values();
+assert_eq!(values, vec![&env, 0, 10, 20]);
+```
+
+## Utility Methods
+
+### `is_empty`
+
+```rust
+pub fn is_empty(&self) -> bool
+```
+
+Returns true if the map is empty and contains no key-values.
+
+### `len`
+
+```rust
+pub fn len(&self) -> u32
+```
+
+Returns the number of key-value pairs in the map.
+
+## Iterator Methods
+
+### `iter`
+
+```rust
+pub fn iter(&self) -> UnwrappedIter<MapTryIter<K, V>, (K, V), ConversionError>
+```
+
+Returns an iterator over the map.
+
+### `try_iter`
+
+```rust
+pub fn try_iter(&self) -> MapTryIter<K, V>
+```
+
+Returns a fallible iterator over the map.
+
+### `into_try_iter`
+
+```rust
+pub fn into_try_iter(self) -> MapTryIter<K, V>
+```
+
+Converts the map into a fallible iterator.
+
+## Conversion Methods
+
+### `env`
+
+```rust
+pub fn env(&self) -> &Env
+```
+
+Returns a reference to the environment.
+
+### `as_val`
+
+```rust
+pub fn as_val(&self) -> &Val
+```
+
+Returns a reference to the underlying Val.
+
+### `to_val`
+
+```rust
+pub fn to_val(&self) -> Val
+```
+
+Converts to a Val.
+
+## Macro
+
+### `map!`
+
+```rust
+map!($env:expr $(,)?)
+map!($env:expr, $(($k:expr, $v:expr $(,)?)),+ $(,)?)
+```
+
+Create a Map with the given key-value pairs.
+
+The first argument in the list must be a reference to an Env, then the key-value pairs follow in a tuple `(key, value)`.
+
+**Example:**
+```rust
+use soroban_sdk::{Env, Map, map};
+
+let env = Env::default();
+let map = map![&env, (1, 10), (2, 20)];
+assert_eq!(map.len(), 2);
+```
+
+## Usage Examples
+
+### Basic Usage
+
+```rust
+use soroban_sdk::{Env, Map, map};
+
+let env = Env::default();
+let map = map![&env, (2, 20), (1, 10)];
+assert_eq!(map.len(), 2);
+assert_eq!(map.iter().next(), Some((1, 10)));
+```
+
+### Maps Are Ordered
+
+Maps created with elements in different order will be equal because they are ordered by keys.
+
+```rust
+use soroban_sdk::{Env, Map, map};
+
+let env = Env::default();
+assert_eq!(
+    map![&env, (1, 10), (2, 20)],
+    map![&env, (2, 20), (1, 10)],
+)
+```
+
+### Iterating Over a Map
+
+```rust
+use soroban_sdk::{Env, Map, map};
+
+let env = Env::default();
+let map = map![&env, (0, 0), (1, 10), (2, 20), (3, 30), (4, 40)];
+
+for (key, value) in map.iter() {
+    // Process each key-value pair
+}
+```
+
+### Checking for Keys
+
+```rust
+use soroban_sdk::{Env, Map, map};
+
+let env = Env::default();
+let map = map![&env, (1, 10), (2, 20)];
+
+assert_eq!(map.contains_key(1), true);
+assert_eq!(map.contains_key(3), false);
+```
+
+### Getting and Setting Values
+
+```rust
+use soroban_sdk::{Env, Map};
+
+let env = Env::default();
+let mut map = Map::new(&env);
+
+map.set(1, 10);
+map.set(2, 20);
+
+assert_eq!(map.get(1), Some(10));
+assert_eq!(map.get(2), Some(20));
+assert_eq!(map.get(3), None);
+
+// Update existing value
+map.set(1, 15);
+assert_eq!(map.get(1), Some(15));
+```
+
+### Removing Values
+
+```rust
+use soroban_sdk::{Env, Map, map};
+
+let env = Env::default();
+let mut map = map![&env, (1, 10), (2, 20), (3, 30)];
+
+assert_eq!(map.len(), 3);
+map.remove(2);
+assert_eq!(map.len(), 2);
+assert_eq!(map.get(2), None);
+```
+
+### Getting Keys and Values
+
+```rust
+use soroban_sdk::{Env, Map, map};
+
+let env = Env::default();
+let map = map![&env, (0, 0), (1, 10), (2, 20)];
+
+let keys = map.keys();
+let values = map.values();
+
+// Keys and values are returned in order
+assert_eq!(keys.get(0), Some(0));
+assert_eq!(values.get(0), Some(0));
+```
+
+## See Also
+
+- `Vec` for sequential collections
+- `Storage` for persistent storage

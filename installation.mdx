@@ -1,0 +1,232 @@
+---
+title: Installation
+description: Set up your development environment for building Soroban smart contracts
+---
+
+## Prerequisites
+
+Before installing the Soroban SDK, ensure you have the following prerequisites:
+
+<Steps>
+  <Step title="Install Rust">
+    The Soroban SDK requires **Rust 1.84.0 or later**. Install Rust using rustup:
+
+    ```bash
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+    ```
+
+    After installation, verify your Rust version:
+
+    ```bash
+    rustc --version
+    ```
+
+    <Note>
+      Make sure you have at least Rust version 1.84.0. If you have an older version, update with `rustup update`.
+    </Note>
+  </Step>
+
+  <Step title="Add WASM Target">
+    Soroban contracts compile to WebAssembly. Add the WASM target:
+
+    ```bash
+    rustup target add wasm32v1-none
+    ```
+
+    This target is specifically designed for Soroban smart contracts.
+  </Step>
+
+  <Step title="Install Required Components">
+    Ensure you have the necessary Rust components:
+
+    ```bash
+    rustup component add rustc cargo rustfmt clippy rust-src
+    ```
+
+    These components provide:
+    - `rustc`: The Rust compiler
+    - `cargo`: Rust's package manager
+    - `rustfmt`: Code formatting
+    - `clippy`: Linting and best practices
+    - `rust-src`: Source code for the standard library
+  </Step>
+</Steps>
+
+## Adding Soroban SDK to Your Project
+
+<Steps>
+  <Step title="Create a New Project">
+    Create a new Rust library project:
+
+    ```bash
+    cargo new --lib my-contract
+    cd my-contract
+    ```
+  </Step>
+
+  <Step title="Add SDK Dependency">
+    Add the Soroban SDK to your `Cargo.toml`:
+
+    ```toml Cargo.toml
+    [package]
+    name = "my-contract"
+    version = "0.1.0"
+    edition = "2021"
+
+    [lib]
+    crate-type = ["cdylib"]
+
+    [dependencies]
+    soroban-sdk = "25.1.1"
+
+    [dev-dependencies]
+    soroban-sdk = { version = "25.1.1", features = ["testutils"] }
+    ```
+
+    <Note>
+      The `testutils` feature is included in dev-dependencies to enable testing capabilities. It should not be used in production builds.
+    </Note>
+  </Step>
+
+  <Step title="Configure Rust Toolchain (Optional)">
+    Create a `rust-toolchain.toml` file to ensure consistent builds:
+
+    ```toml rust-toolchain.toml
+    [toolchain]
+    channel = "stable"
+    targets = ["wasm32v1-none"]
+    components = ["rustc", "cargo", "rustfmt", "clippy", "rust-src"]
+    ```
+
+    This ensures all developers use the same Rust version and configuration.
+  </Step>
+
+  <Step title="Configure Build Profile">
+    Add optimized build profiles to your `Cargo.toml`:
+
+    ```toml Cargo.toml
+    [profile.release]
+    opt-level = "z"
+    overflow-checks = true
+    debug = 0
+    strip = "symbols"
+    debug-assertions = false
+    panic = "abort"
+    codegen-units = 1
+    lto = true
+    ```
+
+    These settings optimize for small binary size and security:
+    - `opt-level = "z"`: Optimize for size
+    - `overflow-checks = true`: Runtime overflow checking
+    - `panic = "abort"`: Smaller panic handler
+    - `lto = true`: Link-time optimization
+  </Step>
+</Steps>
+
+## Building Your Contract
+
+Once configured, build your contract with:
+
+<CodeGroup>
+
+```bash Development Build
+cargo build --target wasm32v1-none
+```
+
+```bash Release Build
+cargo build --target wasm32v1-none --release
+```
+
+</CodeGroup>
+
+<Tip>
+  Use the release build for production deployments as it produces significantly smaller WASM binaries.
+</Tip>
+
+## Verification
+
+Verify your installation by creating a simple contract:
+
+```rust src/lib.rs
+#![no_std]
+use soroban_sdk::{contract, contractimpl};
+
+#[contract]
+pub struct Contract;
+
+#[contractimpl]
+impl Contract {
+    pub fn hello() -> u32 {
+        42
+    }
+}
+```
+
+Build it to ensure everything is working:
+
+```bash
+cargo build --target wasm32v1-none --release
+```
+
+If the build succeeds, your installation is complete!
+
+## Additional Tools
+
+Consider installing these helpful tools:
+
+<CardGroup cols={2}>
+  <Card title="Soroban CLI" icon="terminal">
+    Official CLI for deploying and interacting with contracts
+    
+    ```bash
+    cargo install soroban-cli
+    ```
+  </Card>
+  <Card title="Stellar CLI" icon="star">
+    Broader Stellar ecosystem tools
+    
+    ```bash
+    cargo install stellar-cli
+    ```
+  </Card>
+</CardGroup>
+
+## Troubleshooting
+
+### Target Not Found
+
+If you get an error about `wasm32v1-none` not being found:
+
+```bash
+rustup target add wasm32v1-none --toolchain stable
+```
+
+### Dependency Resolution Issues
+
+If cargo fails to resolve dependencies, try:
+
+```bash
+cargo clean
+cargo update
+cargo build --target wasm32v1-none
+```
+
+### Rust Version Conflicts
+
+Ensure you're using Rust 1.84.0 or later:
+
+```bash
+rustup update stable
+rustup default stable
+```
+
+## Next Steps
+
+<Card
+  title="Build Your First Contract"
+  icon="rocket"
+  href="/quickstart"
+>
+  Follow our quickstart guide to create your first Soroban smart contract
+</Card>

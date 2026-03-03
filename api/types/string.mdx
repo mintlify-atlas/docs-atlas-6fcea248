@@ -1,0 +1,293 @@
+---
+title: "String"
+description: "String type for text data in Soroban contracts"
+---
+
+## Overview
+
+`String` is a contiguous growable array type containing bytes, stored in the Host and available to contracts through a well-defined API.
+
+<Note>
+  Soroban `String` does not enforce any particular encoding (like UTF-8). It simply stores bytes that can represent text in any encoding.
+</Note>
+
+## Creating Strings
+
+### `from_str()`
+
+Creates a String from a Rust string slice.
+
+```rust
+pub fn from_str(env: &Env, s: &str) -> String
+```
+
+**Example:**
+```rust
+let msg = String::from_str(&env, "Hello, Soroban!");
+```
+
+### `from_bytes()`
+
+Creates a String from raw bytes.
+
+```rust
+pub fn from_bytes(env: &Env, b: &[u8]) -> String
+```
+
+**Example:**
+```rust
+let bytes = [72, 101, 108, 108, 111]; // "Hello" in ASCII
+let s = String::from_bytes(&env, &bytes);
+```
+
+## Query Methods
+
+### `len()`
+
+Returns the number of bytes in the String.
+
+```rust
+pub fn len(&self) -> u32
+```
+
+**Example:**
+```rust
+let s = String::from_str(&env, "Hello");
+assert_eq!(s.len(), 5);
+```
+
+### `is_empty()`
+
+Returns true if the String is empty.
+
+```rust
+pub fn is_empty(&self) -> bool
+```
+
+**Example:**
+```rust
+let s = String::from_str(&env, "");
+assert!(s.is_empty());
+```
+
+## Copying Data
+
+### `copy_into_slice()`
+
+Copies the String bytes into the given slice.
+
+```rust
+pub fn copy_into_slice(&self, slice: &mut [u8])
+```
+
+**Panics:**
+If the output slice and string are of different lengths.
+
+**Example:**
+```rust
+let s = String::from_str(&env, "Hello");
+let mut output = [0u8; 5];
+s.copy_into_slice(&mut output);
+assert_eq!(&output, b"Hello");
+```
+
+## Conversion
+
+### `to_bytes()`
+
+Converts the String into a Bytes object.
+
+```rust
+pub fn to_bytes(&self) -> Bytes
+```
+
+**Example:**
+```rust
+let s = String::from_str(&env, "Hello");
+let b: Bytes = s.to_bytes();
+assert_eq!(b.len(), 5);
+```
+
+### From Bytes
+
+Convert a Bytes object into a String.
+
+```rust
+let b = bytes!(&env, [72, 101, 108, 108, 111]);
+let s: String = b.into();
+```
+
+## Display (Non-Wasm only)
+
+### `to_string()`
+
+Converts to a Rust `String` for display purposes.
+
+```rust
+let s = String::from_str(&env, "Hello");
+let rust_string = s.to_string();
+assert_eq!(rust_string, "Hello");
+```
+
+<Warning>
+  This method is only available in non-Wasm environments (e.g., tests) and will panic if the bytes are not valid UTF-8.
+</Warning>
+
+## Internal Methods
+
+### `env()`
+
+Returns a reference to the `Env`.
+
+```rust
+pub fn env(&self) -> &Env
+```
+
+### `as_val()` / `to_val()`
+
+Convert to/from `Val` representation.
+
+```rust
+pub fn as_val(&self) -> &Val
+pub fn to_val(&self) -> Val
+```
+
+### `as_object()` / `to_object()`
+
+Convert to/from `StringObject` representation.
+
+```rust
+pub fn as_object(&self) -> &StringObject
+pub fn to_object(&self) -> StringObject
+```
+
+## Traits
+
+`String` implements:
+- `Clone`
+- `Debug`
+- `Eq`, `PartialEq`
+- `Ord`, `PartialOrd`
+- `Display` (non-Wasm only)
+- `TryFromVal<Env, &str>`
+
+## Examples
+
+### Basic String Operations
+
+```rust
+use soroban_sdk::{Env, String};
+
+let env = Env::default();
+
+// Create from string literal
+let greeting = String::from_str(&env, "Hello, Soroban!");
+
+// Check length
+assert_eq!(greeting.len(), 15);
+assert!(!greeting.is_empty());
+
+// Copy to buffer
+let mut buffer = [0u8; 15];
+greeting.copy_into_slice(&mut buffer);
+```
+
+### Converting Between String and Bytes
+
+```rust
+use soroban_sdk::{Bytes, Env, String, bytes};
+
+let env = Env::default();
+
+// String to Bytes
+let s = String::from_str(&env, "hello");
+let b: Bytes = s.to_bytes();
+
+// Bytes to String
+let b2 = bytes!(&env, [104, 101, 108, 108, 111]);
+let s2: String = b2.into();
+
+assert_eq!(s, s2);
+```
+
+### Using String in Storage
+
+```rust
+use soroban_sdk::{contract, contractimpl, symbol_short, Env, String};
+
+#[contract]
+pub struct MetadataContract;
+
+#[contractimpl]
+impl MetadataContract {
+    pub fn set_name(env: Env, name: String) {
+        env.storage().instance().set(&symbol_short!("name"), &name);
+    }
+    
+    pub fn get_name(env: Env) -> String {
+        env.storage()
+            .instance()
+            .get(&symbol_short!("name"))
+            .unwrap_or(String::from_str(&env, "Unnamed"))
+    }
+}
+```
+
+### Creating from User Input
+
+```rust
+pub fn process_message(env: Env, message: String) {
+    // String can be passed directly as a contract argument
+    if message.is_empty() {
+        panic!("Message cannot be empty");
+    }
+    
+    env.storage().instance().set(&symbol_short!("msg"), &message);
+}
+```
+
+### Working with Binary Data as String
+
+```rust
+use soroban_sdk::{Env, String};
+
+let env = Env::default();
+
+// String can contain any bytes, not just valid UTF-8
+let binary_data = [0xFF, 0xFE, 0xFD, 0xFC];
+let s = String::from_bytes(&env, &binary_data);
+
+assert_eq!(s.len(), 4);
+
+let mut output = [0u8; 4];
+s.copy_into_slice(&mut output);
+assert_eq!(output, binary_data);
+```
+
+## Best Practices
+
+1. **Use String for text data**: While String doesn't enforce encoding, it's semantically meant for text.
+
+2. **Use Bytes for binary data**: If you're working with hashes, signatures, or other binary data, use `Bytes` or `BytesN` instead.
+
+3. **Be mindful of encoding**: Soroban String doesn't validate UTF-8 or any encoding. If you need UTF-8 guarantees, validate separately.
+
+4. **Prefer `from_str()` for literals**: When creating from string literals, use `from_str()`:
+
+```rust
+// Good
+let s = String::from_str(&env, "hello");
+
+// Unnecessary
+let s = String::from_bytes(&env, b"hello");
+```
+
+5. **Use conversion methods**: Convert between String and Bytes as needed:
+
+```rust
+// String → Bytes
+let bytes = string.to_bytes();
+
+// Bytes → String  
+let string: String = bytes.into();
+```

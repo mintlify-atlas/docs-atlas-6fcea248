@@ -1,0 +1,484 @@
+---
+title: "Custom Types"
+description: "Define custom data structures using #[contracttype]"
+---
+
+The `#[contracttype]` macro allows you to define custom data structures that can be used in contract functions, stored in contract storage, and serialized to/from XDR.
+
+## Why Use Custom Types?
+
+Custom types help you:
+- **Structure data**: Group related fields together
+- **Improve type safety**: Prevent mixing up function parameters
+- **Enhance readability**: Make contract interfaces self-documenting
+- **Enable storage**: Store complex data in contract storage
+
+## Defining Custom Types
+
+Use the `#[contracttype]` macro on structs and enums:
+
+### Struct Types
+
+```rust
+use soroban_sdk::{contracttype, Address, Vec};
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct User {
+    pub address: Address,
+    pub balance: i128,
+    pub is_active: bool,
+}
+```
+
+<Note>
+  It's recommended to derive `Clone`, `Debug`, `Eq`, and `PartialEq` for convenience.
+</Note>
+
+### Enum Types
+
+Enums can be simple discriminants or hold data:
+
+```rust
+#[contracttype]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum Status {
+    Pending = 0,
+    Active = 1,
+    Completed = 2,
+    Cancelled = 3,
+}
+```
+
+Enums with associated data:
+
+```rust
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum OrderStatus {
+    Pending,
+    Processing(Address),      // Contains processor address
+    Shipped(String),          // Contains tracking number
+    Delivered,
+}
+```
+
+## Complete Example
+
+Here's a contract using multiple custom types:
+
+```rust
+#![no_std]
+use soroban_sdk::{
+    contract, contractimpl, contracttype, Address, Env, String, Vec
+};
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Product {
+    pub id: u64,
+    pub name: String,
+    pub price: i128,
+    pub category: Category,
+}
+
+#[contracttype]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum Category {
+    Electronics = 0,
+    Clothing = 1,
+    Food = 2,
+    Books = 3,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Order {
+    pub id: u64,
+    pub buyer: Address,
+    pub products: Vec<Product>,
+    pub total: i128,
+    pub status: OrderStatus,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum OrderStatus {
+    Created,
+    Paid,
+    Shipped,
+    Delivered,
+    Cancelled,
+}
+
+#[contract]
+pub struct Contract;
+
+#[contractimpl]
+impl Contract {
+    pub fn create_order(
+        env: Env,
+        id: u64,
+        buyer: Address,
+        products: Vec<Product>,
+    ) -> Order {
+        let total = products.iter()
+            .map(|p| p.price)
+            .sum();
+
+        Order {
+            id,
+            buyer,
+            products,
+            total,
+            status: OrderStatus::Created,
+        }
+    }
+
+    pub fn get_product_category(product: Product) -> Category {
+        product.category
+    }
+}
+```
+
+## Nested Types
+
+Custom types can contain other custom types:
+
+```rust
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OrderItem {
+    pub product_id: u64,
+    pub quantity: u32,
+    pub price: i128,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Order {
+    pub id: u64,
+    pub buyer: Address,
+    pub items: Vec<OrderItem>,  // Contains another custom type
+    pub total_price: i128,
+}
+```
+
+## Using Custom Types with Storage
+
+Store custom types in contract storage:
+
+<CodeGroup>
+
+```rust Storing
+#[contracttype]
+pub enum DataKey {
+    User(Address),
+    Order(u64),
+}
+
+#[contractimpl]
+impl Contract {
+    pub fn save_user(env: Env, user: User) {
+        env.storage()
+            .persistent()
+            .set(&DataKey::User(user.address.clone()), &user);
+    }
+
+    pub fn get_user(env: Env, address: Address) -> Option<User> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::User(address))
+    }
+}
+```
+
+```rust Updating
+pub fn update_balance(env: Env, address: Address, new_balance: i128) {
+    let key = DataKey::User(address.clone());
+    
+    if let Some(mut user) = env.storage().persistent().get(&key) {
+        user.balance = new_balance;
+        env.storage().persistent().set(&key, &user);
+    }
+}
+```
+
+</CodeGroup>
+
+## Tuple Structs
+
+You can define tuple structs for simple wrappers:
+
+```rust
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Point(pub i64, pub i64);
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Coordinates(pub i64, pub Vec<i64>);
+
+#[contractimpl]
+impl Contract {
+    pub fn distance(p1: Point, p2: Point) -> i64 {
+        ((p2.0 - p1.0).pow(2) + (p2.1 - p1.1).pow(2)).sqrt()
+    }
+}
+```
+
+## Enums with Complex Data
+
+Enums can contain different types of data in each variant:
+
+```rust
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum PaymentMethod {
+    Token(Address),           // Token contract address
+    Native,                   // Native token (XLM)
+    MultiToken(Vec<Address>), // Multiple tokens
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum Result {
+    Success(i128),           // Success with value
+    Error(u32),              // Error with code
+}
+```
+
+## Pattern Matching
+
+Use pattern matching with custom enums:
+
+```rust
+#[contractimpl]
+impl Contract {
+    pub fn calculate_price(item: Item) -> i128 {
+        match item.category {
+            Category::Electronics => item.base_price * 120 / 100,
+            Category::Clothing => item.base_price * 110 / 100,
+            Category::Food => item.base_price * 105 / 100,
+            Category::Books => item.base_price,
+        }
+    }
+
+    pub fn process_order(env: Env, order: Order) {
+        match order.status {
+            OrderStatus::Created => {
+                // Handle new order
+            },
+            OrderStatus::Paid => {
+                // Begin processing
+            },
+            OrderStatus::Shipped => {
+                // Track shipment
+            },
+            OrderStatus::Delivered => {
+                // Complete order
+            },
+            OrderStatus::Cancelled => {
+                // Refund
+            },
+        }
+    }
+}
+```
+
+## Testing Custom Types
+
+Custom types work seamlessly in tests:
+
+```rust
+#[cfg(test)]
+mod test {
+    use super::*;
+    use soroban_sdk::{Env, testutils::Address as _};
+
+    #[test]
+    fn test_custom_types() {
+        let env = Env::default();
+        let contract_id = env.register(Contract, ());
+        let client = ContractClient::new(&env, &contract_id);
+
+        let user = User {
+            address: Address::generate(&env),
+            balance: 1000,
+            is_active: true,
+        };
+
+        client.save_user(&user);
+        
+        let retrieved = client.get_user(&user.address);
+        assert_eq!(retrieved, Some(user));
+    }
+
+    #[test]
+    fn test_enum_variants() {
+        let env = Env::default();
+        
+        let status1 = OrderStatus::Created;
+        let status2 = OrderStatus::Shipped;
+        
+        assert_ne!(status1, status2);
+    }
+}
+```
+
+## XDR Serialization
+
+Custom types are automatically serialized to/from XDR:
+
+```rust
+#[cfg(test)]
+mod test {
+    use super::*;
+    use soroban_sdk::{Env, xdr::ScVal, TryFromVal};
+
+    #[test]
+    fn test_serialization() {
+        let env = Env::default();
+        
+        let user = User {
+            address: Address::generate(&env),
+            balance: 1000,
+            is_active: true,
+        };
+
+        // Convert to XDR
+        let xdr_val: ScVal = user.clone().try_into().unwrap();
+        
+        // Convert back from XDR
+        let roundtrip = User::try_from_val(&env, &xdr_val).unwrap();
+        
+        assert_eq!(user, roundtrip);
+    }
+}
+```
+
+## Storage Keys
+
+Use enums as storage keys for type-safe storage access:
+
+```rust
+#[contracttype]
+pub enum DataKey {
+    // Simple variants
+    Admin,
+    TotalSupply,
+    
+    // Variants with data
+    Balance(Address),
+    Allowance(Address, Address),
+    Order(u64),
+    User(Address),
+}
+
+#[contractimpl]
+impl Contract {
+    pub fn set_balance(env: Env, addr: Address, amount: i128) {
+        env.storage()
+            .persistent()
+            .set(&DataKey::Balance(addr), &amount);
+    }
+
+    pub fn get_balance(env: Env, addr: Address) -> i128 {
+        env.storage()
+            .persistent()
+            .get(&DataKey::Balance(addr))
+            .unwrap_or(0)
+    }
+}
+```
+
+<Tip>
+  Using typed enum variants for storage keys prevents key collisions and makes code more maintainable.
+</Tip>
+
+## Field Visibility
+
+Fields can be public or private:
+
+```rust
+#[contracttype]
+#[derive(Clone)]
+pub struct User {
+    pub address: Address,    // Public field
+    balance: i128,           // Private field
+}
+
+impl User {
+    // Provide controlled access to private fields
+    pub fn balance(&self) -> i128 {
+        self.balance
+    }
+}
+```
+
+## Explicit Discriminants
+
+Set explicit values for enum discriminants:
+
+```rust
+#[contracttype]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum ErrorCode {
+    InvalidInput = 1,
+    Unauthorized = 2,
+    InsufficientBalance = 3,
+    NotFound = 4,
+}
+```
+
+<Warning>
+  Once deployed, don't change enum discriminant values as this will break existing stored data.
+</Warning>
+
+## Limitations
+
+Custom types have some restrictions:
+
+- Cannot implement arbitrary traits (only SDK-provided traits)
+- Cannot have generic type parameters
+- Cannot have lifetime parameters
+- Must be serializable to XDR
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Use descriptive names">
+    Choose clear, self-documenting names for types and fields:
+    ```rust
+    pub struct Order { }  // Good
+    pub struct Ord { }    // Bad: unclear abbreviation
+    ```
+  </Accordion>
+
+  <Accordion title="Keep types focused">
+    Each type should represent a single concept or entity.
+  </Accordion>
+
+  <Accordion title="Derive common traits">
+    Always derive `Clone`, `Debug`, `Eq`, `PartialEq` for custom types.
+  </Accordion>
+
+  <Accordion title="Use enums for state">
+    Represent different states with enum variants rather than boolean flags.
+  </Accordion>
+
+  <Accordion title="Plan for evolution">
+    Consider how types might need to change in future versions.
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Events" icon="broadcast-tower" href="/guides/events">
+    Use custom types in events
+  </Card>
+  <Card title="Error Handling" icon="triangle-exclamation" href="/guides/error-handling">
+    Define custom error types
+  </Card>
+</CardGroup>

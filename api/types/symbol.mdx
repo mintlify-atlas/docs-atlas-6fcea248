@@ -1,0 +1,187 @@
+---
+title: "Symbol"
+description: "Short string type with limited character set"
+---
+
+## Overview
+
+`Symbol` is a short string type with a limited character set, used for symbolic identifiers such as function names and user-defined structure field/enum variant names.
+
+**Characteristics:**
+- Valid characters: `a-zA-Z0-9_`
+- Maximum length: 32 characters
+- Symbols ≤ 9 characters are more efficient at runtime
+- Short symbols (≤ 9 chars) can be computed at compile time
+
+## Creating Symbols
+
+### `new()`
+
+Creates a new Symbol from a string with valid characters.
+
+```rust
+pub fn new(env: &Env, s: &str) -> Self
+```
+
+**Panics:**
+When the input string is not representable by Symbol (invalid characters or too long).
+
+**Example:**
+```rust
+let symbol = Symbol::new(&env, "transfer");
+```
+
+### `symbol_short!()` Macro
+
+For short symbols (≤ 9 characters), use the `symbol_short!()` macro to ensure compile-time conversion:
+
+```rust
+use soroban_sdk::symbol_short;
+
+let symbol = symbol_short!("transfer");
+```
+
+<Note>
+  The `symbol_short!()` macro ensures the conversion always occurs at compile time, avoiding runtime overhead in the Wasm binary.
+</Note>
+
+### `short()` (Deprecated)
+
+Creates a short symbol (≤ 9 characters). This method is deprecated in favor of `symbol_short!()`.
+
+```rust
+const SYMBOL: Symbol = Symbol::short("transfer");
+```
+
+## Comparison
+
+Symbols support full comparison operations:
+
+```rust
+let sym1 = Symbol::new(&env, "apple");
+let sym2 = Symbol::new(&env, "banana");
+
+assert!(sym1 < sym2);
+assert_eq!(sym1, sym1);
+```
+
+## Conversion Methods
+
+### `as_val()` / `to_val()`
+
+Convert to `Val` representation.
+
+```rust
+pub fn as_val(&self) -> &Val
+pub fn to_val(&self) -> Val
+```
+
+### `to_symbol_val()`
+
+Convert to `SymbolVal` representation.
+
+```rust
+pub fn to_symbol_val(&self) -> SymbolVal
+```
+
+### `to_string()` (Non-Wasm only)
+
+Convert the Symbol to a Rust `String`.
+
+```rust
+let s = symbol.to_string();
+assert_eq!(s, "transfer");
+```
+
+## Traits
+
+`Symbol` implements:
+- `Clone`
+- `Debug`
+- `Eq`, `PartialEq`
+- `Ord`, `PartialOrd`
+- `TryFromVal<Env, &str>`
+
+## Examples
+
+### Function Names
+
+```rust
+use soroban_sdk::{contract, contractimpl, symbol_short, Env, Symbol};
+
+#[contract]
+pub struct Contract;
+
+#[contractimpl]
+impl Contract {
+    pub fn hello(env: Env) -> Symbol {
+        symbol_short!("world")
+    }
+}
+```
+
+### Dynamic Symbol Creation
+
+```rust
+let func_name = Symbol::new(&env, "my_function");
+let result = env.invoke_contract::<i128>(
+    &contract_address,
+    &func_name,
+    args,
+);
+```
+
+### Symbol as Map Key
+
+```rust
+use soroban_sdk::{Map, Symbol};
+
+let mut config: Map<Symbol, i128> = Map::new(&env);
+config.set(Symbol::new(&env, "max_supply"), 1_000_000);
+config.set(Symbol::new(&env, "decimals"), 7);
+
+let decimals = config.get(Symbol::new(&env, "decimals")).unwrap();
+```
+
+### Compile-Time Short Symbols
+
+```rust
+use soroban_sdk::symbol_short;
+
+// These symbols are computed at compile time
+const TRANSFER: Symbol = symbol_short!("transfer");
+const APPROVE: Symbol = symbol_short!("approve");
+const BALANCE: Symbol = symbol_short!("balance");
+
+#[contractimpl]
+impl Contract {
+    pub fn transfer(env: Env, from: Address, to: Address, amount: i128) {
+        from.require_auth();
+        // Use TRANSFER constant
+        env.events().publish((TRANSFER, from, to), amount);
+    }
+}
+```
+
+## Best Practices
+
+1. **Use `symbol_short!()` for symbols ≤ 9 characters**: This ensures compile-time evaluation and smaller Wasm binaries.
+
+```rust
+// Good - compile time
+let sym = symbol_short!("transfer");
+
+// Avoid - runtime conversion
+let sym = Symbol::short("transfer");
+```
+
+2. **Use `Symbol::new()` for longer symbols or dynamic creation**:
+
+```rust
+let long_symbol = Symbol::new(&env, "very_long_function_name");
+let dynamic = Symbol::new(&env, user_input);
+```
+
+3. **Stick to alphanumeric and underscore characters**: Only `a-zA-Z0-9_` are valid.
+
+4. **Keep symbols short**: While 32 characters are allowed, shorter symbols are more efficient.

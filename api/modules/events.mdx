@@ -1,0 +1,297 @@
+---
+title: "events"
+description: "Publishing contract events and event types"
+---
+
+The `events` module provides types for publishing events from smart contracts. Events allow contracts to emit notifications about important state changes or actions.
+
+## Overview
+
+Access event publishing functions through `env.events()` in your contracts. Events include topics (for indexing) and data.
+
+## Types
+
+### Events
+
+Publishes events for the currently executing contract.
+
+```rust
+pub struct Events(Env);
+```
+
+Obtain via `env.events()` in contract code.
+
+## Functions
+
+### publish_event
+
+Publishes an event defined using the `#[contractevent]` macro.
+
+```rust
+pub fn publish_event(&self, e: &impl Event)
+```
+
+**Recommended:** Use this with the `#[contractevent]` macro for type-safe events.
+
+**Example:**
+```rust
+use soroban_sdk::{contract, contractimpl, contractevent, Env, Address, symbol_short};
+
+#[contractevent]
+pub struct Transfer {
+    pub from: Address,
+    pub to: Address,
+    pub amount: i128,
+}
+
+#[contract]
+pub struct TokenContract;
+
+#[contractimpl]
+impl TokenContract {
+    pub fn transfer(env: Env, from: Address, to: Address, amount: i128) {
+        // ... transfer logic ...
+        
+        // Publish event
+        env.events().publish_event(&Transfer {
+            from,
+            to,
+            amount,
+        });
+    }
+}
+```
+
+### publish (deprecated)
+
+Publishes an event with topics and data.
+
+```rust
+#[deprecated(note = "use the #[contractevent] macro")]
+pub fn publish<T, D>(&self, topics: T, data: D)
+where
+    T: Topics,
+    D: IntoVal<Env, Val>
+```
+
+**Note:** Use `#[contractevent]` and `publish_event` instead for better type safety.
+
+**Parameters:**
+- `topics` - Event topics for indexing (tuple or Vec)
+- `data` - Event data (any serializable value)
+
+**Example:**
+```rust
+use soroban_sdk::{Env, map};
+
+fn publish_old_style(env: &Env) {
+    let data = map![env, (1u32, 2u32)];
+    
+    // With tuple topics
+    env.events().publish((0u32, 1u32), data.clone());
+    
+    // With Vec topics
+    let topics = vec![env, 0u32, 1u32, 2u32];
+    env.events().publish(topics, data);
+}
+```
+
+## Topics
+
+Event topics are used for indexing and filtering events. Topics can be specified as:
+
+- `()` - No topics
+- `(T,)` - Single topic
+- `(T1, T2)` - Two topics
+- `(T1, T2, T3)` - Three topics
+- `(T1, T2, T3, T4)` - Four topics
+- `Vec<T>` - Any number of topics
+
+### Topic Restrictions
+
+Topics must not contain:
+- `Vec`
+- `Map`
+- `Bytes`/`BytesN` longer than 32 bytes
+- Contract types (types defined with `#[contracttype]`)
+
+## Event Trait
+
+The `Event` trait is automatically implemented for types annotated with `#[contractevent]`.
+
+```rust
+pub trait Event {
+    fn topics(&self, env: &Env) -> Vec<Val>;
+    fn data(&self, env: &Env) -> Val;
+    fn publish(&self, env: &Env);
+}
+```
+
+## Examples
+
+### Simple Event
+
+```rust
+use soroban_sdk::{contract, contractimpl, contractevent, Env, symbol_short};
+
+#[contractevent]
+pub struct Increment {
+    pub new_value: u32,
+}
+
+#[contract]
+pub struct Counter;
+
+#[contractimpl]
+impl Counter {
+    pub fn increment(env: Env) {
+        let mut count: u32 = env.storage().instance()
+            .get(&symbol_short!("COUNT"))
+            .unwrap_or(0);
+        
+        count += 1;
+        env.storage().instance().set(&symbol_short!("COUNT"), &count);
+        
+        // Publish event
+        env.events().publish_event(&Increment {
+            new_value: count,
+        });
+    }
+}
+```
+
+### Event with Multiple Fields
+
+```rust
+use soroban_sdk::{contract, contractimpl, contractevent, Env, Address, Symbol};
+
+#[contractevent]
+pub struct Approval {
+    pub owner: Address,
+    pub spender: Address,
+    pub amount: i128,
+    pub expiration: u32,
+}
+
+#[contract]
+pub struct Token;
+
+#[contractimpl]
+impl Token {
+    pub fn approve(
+        env: Env,
+        owner: Address,
+        spender: Address,
+        amount: i128,
+        expiration: u32
+    ) {
+        // ... approval logic ...
+        
+        env.events().publish_event(&Approval {
+            owner,
+            spender,
+            amount,
+            expiration,
+        });
+    }
+}
+```
+
+### Using Event Publish Method
+
+```rust
+use soroban_sdk::{contractevent, Env, Address};
+
+#[contractevent]
+pub struct Transfer {
+    pub from: Address,
+    pub to: Address,
+    pub amount: i128,
+}
+
+fn transfer_tokens(env: &Env, from: Address, to: Address, amount: i128) {
+    // ... transfer logic ...
+    
+    // Can call publish directly on the event
+    Transfer {
+        from,
+        to,
+        amount,
+    }.publish(env);
+}
+```
+
+## Test Utilities
+
+When the `testutils` feature is enabled, additional functions are available for testing events:
+
+### all
+
+Returns all contract events emitted during the last invocation.
+
+```rust
+pub fn all(&self) -> ContractEvents
+```
+
+**Example:**
+```rust
+#[test]
+fn test_events() {
+    let env = Env::default();
+    let contract_id = env.register(Contract, ());
+    let client = ContractClient::new(&env, &contract_id);
+    
+    // Call contract function
+    client.transfer(&from, &to, &100);
+    
+    // Get all events
+    let events = env.events().all();
+    assert_eq!(events.len(), 1);
+}
+```
+
+### ContractEvents
+
+A collection of contract events for testing.
+
+```rust
+pub struct ContractEvents {
+    // ...
+}
+```
+
+**Methods:**
+- `events() -> &[ContractEvent]` - Returns events in XDR form
+- `filter_by_contract(&self, addr: &Address) -> Self` - Filters events by contract address
+
+**Example:**
+```rust
+#[test]
+fn test_filter_events() {
+    let env = Env::default();
+    let contract1 = env.register(Contract1, ());
+    let contract2 = env.register(Contract2, ());
+    
+    // Call both contracts
+    Contract1Client::new(&env, &contract1).do_something();
+    Contract2Client::new(&env, &contract2).do_something();
+    
+    // Filter events by contract
+    let events1 = env.events().all().filter_by_contract(&contract1);
+    let events2 = env.events().all().filter_by_contract(&contract2);
+}
+```
+
+## Best Practices
+
+1. **Use #[contractevent]**: Always use the `#[contractevent]` macro for type-safe, well-structured events
+2. **Keep topics small**: Topics are for indexing - keep them simple and under 32 bytes
+3. **Use descriptive names**: Event names should clearly describe what happened
+4. **Include relevant data**: Add all data needed to understand the event context
+5. **Document events**: Document what triggers each event and what the fields mean
+
+## See Also
+
+- [#[contractevent]](/api/macros/contractevent) - For defining events
+- [Env](/api/types/env) - For accessing events
+- [Address](/api/types/address) - Often used in events

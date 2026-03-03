@@ -1,0 +1,143 @@
+---
+title: 'Storage Overview'
+description: 'Learn about the Soroban storage system and its three storage types'
+---
+
+## Introduction
+
+The Soroban storage system provides contract data persistence through three distinct storage types, each optimized for different use cases and cost profiles. The `Storage` type is accessible via `env.storage()` and serves as the entry point to all storage operations.
+
+## Storage Types
+
+Soroban offers three storage types, each with different characteristics:
+
+### Persistent Storage
+
+Persistent storage is designed for data that should remain available indefinitely, such as user balances, ownership records, and critical state.
+
+**Characteristics:**
+- More expensive than temporary storage
+- Expired entries are moved to the Expired State Stack (ESS)
+- Can be restored after expiration via Stellar Core operations
+- Cannot be recreated while an expired version exists
+- Best for: Token balances, user properties, ownership data
+
+### Temporary Storage
+
+Temporary storage provides a cheaper alternative for data with limited relevance periods.
+
+**Characteristics:**
+- Cheaper than persistent storage
+- Permanently deleted upon expiration (not recoverable)
+- Can be recreated with different values after deletion
+- Never stored in ESS
+- Best for: Oracle data, claimable balances, temporary offers, cache data
+
+### Instance Storage
+
+Instance storage is optimized for small amounts of contract-level configuration data.
+
+**Characteristics:**
+- Stored within the contract instance entry itself
+- Loaded automatically whenever the contract is invoked
+- Shares TTL with the contract instance
+- Limited by ledger entry size (~100 KB serialized)
+- Does not appear in ledger footprint
+- Best for: Admin accounts, configuration settings, contract metadata, token references
+
+**Important:** Instance storage should only be used for small, frequently-accessed data. Do not use it for unbounded data like user balances.
+
+## Time-To-Live (TTL)
+
+All storage types use TTL to manage data lifetime:
+
+- **TTL** represents the number of ledgers remaining until data expiration (excluding current ledger)
+- Data can be extended before expiration using `extend_ttl()` methods
+- Maximum TTL is network-defined and retrievable via `storage.max_ttl()`
+
+### TTL Extension
+
+Each storage type provides an `extend_ttl()` method with a threshold-based extension pattern:
+
+```rust
+storage.persistent().extend_ttl(&key, threshold, extend_to);
+```
+
+- Only extends if current TTL is below `threshold`
+- Sets TTL to `extend_to` ledgers when extended
+- Prevents unnecessary extensions for recently-extended data
+
+## Access Control
+
+Storage is contract-scoped:
+- Contracts can only access their own storage
+- No cross-contract storage access is possible
+- Each contract maintains isolated storage namespaces
+
+## Basic Usage
+
+Access storage through the environment:
+
+```rust
+use soroban_sdk::{contract, contractimpl, Env, symbol_short};
+
+#[contract]
+pub struct MyContract;
+
+#[contractimpl]
+impl MyContract {
+    pub fn store_data(env: Env) {
+        let storage = env.storage();
+        let key = symbol_short!("counter");
+        
+        // Choose storage type based on use case
+        storage.persistent().set(&key, &100);
+        storage.temporary().set(&key, &200);
+        storage.instance().set(&key, &300);
+    }
+}
+```
+
+## Storage Type Selection Guide
+
+| Use Case | Recommended Type | Reason |
+|----------|-----------------|--------|
+| Token balances | Persistent | Must be recoverable, critical data |
+| User profiles | Persistent | Long-term user data |
+| Oracle price feeds | Temporary | Time-sensitive, can be recreated |
+| Temporary offers | Temporary | Limited lifespan, non-critical |
+| Admin address | Instance | Small, frequently accessed |
+| Contract config | Instance | Small, tied to contract lifetime |
+| Pool reserves | Instance | Frequently accessed, contract-level |
+| User-specific cache | Temporary | Can be recreated, temporary |
+
+## Maximum TTL
+
+Retrieve the maximum possible TTL for the network:
+
+```rust
+let max_ttl = env.storage().max_ttl();
+// Returns the maximum TTL in ledgers
+```
+
+This value represents both:
+- The maximum TTL any entry can have
+- The maximum value for `extend_to` parameter in `extend_ttl()` calls
+
+## Next Steps
+
+<CardGroup cols={3}>
+  <Card title="Persistent Storage" icon="database" href="/api/storage/persistent">
+    Learn about persistent storage API
+  </Card>
+  <Card title="Temporary Storage" icon="clock" href="/api/storage/temporary">
+    Learn about temporary storage API
+  </Card>
+  <Card title="Instance Storage" icon="cube" href="/api/storage/instance">
+    Learn about instance storage API
+  </Card>
+</CardGroup>
+
+## Source Reference
+
+Implementation: `soroban-sdk/src/storage.rs`

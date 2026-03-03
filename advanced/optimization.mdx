@@ -1,0 +1,468 @@
+---
+title: Performance Optimization
+description: Optimize contract size and execution performance in Soroban
+---
+
+Optimizing Soroban smart contracts is crucial for minimizing transaction costs and staying within network resource limits. This guide covers compiler settings, code patterns, and best practices for optimization.
+
+## Cargo Profile Settings
+
+Configure your `Cargo.toml` with optimized release profile settings:
+
+```toml
+[profile.release]
+opt-level = "z"          # Optimize for size
+overflow-checks = true    # Keep overflow checks for safety
+debug = 0                # Strip debug info
+strip = "symbols"        # Strip symbols
+debug-assertions = false # Disable debug assertions
+panic = "abort"          # Use abort instead of unwind
+codegen-units = 1        # Better optimization, slower compile
+lto = true               # Enable Link Time Optimization
+```
+
+### Profile Configuration Breakdown
+
+#### opt-level = "z"
+
+Optimizes for minimal binary size, which is critical for smart contracts:
+
+- `"0"` - No optimization (fastest compilation)
+- `"1"` - Basic optimization
+- `"2"` - Default release optimization
+- `"3"` - Maximum optimization for speed
+- `"s"` - Optimize for size
+- `"z"` - Aggressively optimize for size (recommended)
+
+#### lto = true
+
+Link Time Optimization allows cross-crate optimization:
+
+```toml
+lto = true              # Full LTO
+lto = "thin"           # Faster compilation, less optimization
+lto = "fat"            # Same as true
+lto = false            # Disable LTO
+```
+
+#### codegen-units = 1
+
+Reduced codegen units improve optimization but slow compilation:
+
+```toml
+codegen-units = 1      # Best optimization (slowest compile)
+codegen-units = 16     # Default (faster compile)
+```
+
+## Custom Build Profiles
+
+### Release with Logs
+
+For debugging production builds while maintaining optimizations:
+
+```toml
+[profile.release-with-logs]
+inherits = "release"
+debug-assertions = true
+```
+
+Build with:
+```bash
+cargo build --profile release-with-logs --target wasm32-unknown-unknown
+```
+
+### Release without LTO
+
+Useful for faster iteration during development:
+
+```toml
+[profile.release-without-lto]
+inherits = "release"
+lto = false
+```
+
+### Development Profile
+
+The default dev profile in Soroban SDK workspace:
+
+```toml
+[profile.dev]
+overflow-checks = true   # Catch overflow bugs early
+panic = "abort"         # Consistent with release
+```
+
+## Code Optimization Patterns
+
+### Minimize Storage Operations
+
+Storage operations are expensive. Batch reads and writes:
+
+```rust
+// ❌ Bad: Multiple storage operations
+pub fn update_balances(env: Env, users: Vec<Address>) {
+    for user in users.iter() {
+        let balance = get_balance(&env, &user);
+        set_balance(&env, &user, balance + 100);
+    }
+}
+
+// ✅ Good: Minimize storage calls
+pub fn update_balances(env: Env, users: Vec<Address>) {
+    let mut updates = vec![&env];
+    
+    for user in users.iter() {
+        let balance = get_balance(&env, &user);
+        updates.push_back((user.clone(), balance + 100));
+    }
+    
+    for (user, balance) in updates.iter() {
+        set_balance(&env, &user, balance);
+    }
+}
+```
+
+### Use Efficient Data Types
+
+#### Prefer BytesN over Bytes for Fixed Sizes
+
+```rust
+use soroban_sdk::{Bytes, BytesN};
+
+// ❌ Less efficient for fixed size
+pub fn store_hash(env: Env, hash: Bytes) {
+    // Bytes has runtime length checks
+}
+
+// ✅ More efficient
+pub fn store_hash(env: Env, hash: BytesN<32>) {
+    // BytesN<32> is compile-time fixed size
+}
+```
+
+#### Use symbol_short! When Possible
+
+```rust
+use soroban_sdk::{symbol_short, Symbol};
+
+// ✅ Efficient: Compiled to a constant
+const KEY: Symbol = symbol_short!("balance");
+
+// ❌ Less efficient: Runtime string conversion
+let key = Symbol::new(&env, "balance");
+```
+
+### Avoid Unnecessary Cloning
+
+```rust
+// ❌ Unnecessary clones
+pub fn process(env: Env, data: Bytes) -> Bytes {
+    let copy1 = data.clone();
+    let copy2 = data.clone();
+    // Use copy1 and copy2
+}
+
+// ✅ Use references when possible
+pub fn process(env: Env, data: Bytes) -> Bytes {
+    let len = data.len();
+    // Work with data directly
+    data
+}
+```
+
+### Inline Critical Functions
+
+```rust
+// For small, frequently-called functions
+#[inline(always)]
+pub fn is_authorized(env: &Env, addr: &Address) -> bool {
+    env.storage().instance().has(&addr)
+}
+
+// For larger functions that might benefit
+#[inline]
+pub fn validate_transfer(from: &Address, to: &Address, amount: i128) -> bool {
+    amount > 0 && from != to
+}
+```
+
+### Optimize Loops
+
+```rust
+// ❌ Inefficient: Repeated function calls
+for i in 0..vec.len() {
+    let item = vec.get(i);
+    process(item);
+}
+
+// ✅ Better: Iterator pattern
+for item in vec.iter() {
+    process(item);
+}
+
+// ✅ Even better: Early termination when possible
+for item in vec.iter() {
+    if !should_continue(&item) {
+        break;
+    }
+    process(item);
+}
+```
+
+## Memory Management
+
+### Avoid Large Stack Allocations
+
+```rust
+// ❌ Large stack allocation
+pub fn process_data(env: Env) {
+    let large_array = [0u8; 10000];
+    // ...
+}
+
+// ✅ Use Bytes for large data
+pub fn process_data(env: Env) {
+    let large_data = Bytes::new(&env);
+    // ...
+}
+```
+
+### Reuse Allocations
+
+```rust
+// ✅ Reuse vector capacity
+pub fn batch_process(env: Env, iterations: u32) {
+    let mut buffer = Vec::new(&env);
+    
+    for i in 0..iterations {
+        buffer.clear();  // Reuse capacity
+        // Fill buffer...
+        process_buffer(&buffer);
+    }
+}
+```
+
+## Contract Size Optimization
+
+### Reduce Dependencies
+
+Minimize external crate dependencies:
+
+```toml
+# ❌ Unnecessary dependencies increase size
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+regex = "1.5"
+
+# ✅ Only include what you need
+[dependencies]
+soroban-sdk = "25.1.1"
+```
+
+### Feature Flags
+
+Use feature flags to conditionally compile code:
+
+```rust
+#[cfg(feature = "testutils")]
+pub mod testutils {
+    // Test utilities not included in release
+}
+
+#[cfg(not(target_family = "wasm"))]
+pub fn debug_helper() {
+    // Only compiled for native, not WASM
+}
+```
+
+### Avoid Generic Functions When Possible
+
+Generic functions generate code for each type:
+
+```rust
+// ❌ Creates multiple versions
+pub fn process_value<T>(value: T) where T: IntoVal<Env, Val> {
+    // ...
+}
+
+// ✅ Use concrete types when you know them
+pub fn process_u64(value: u64) {
+    // ...
+}
+
+pub fn process_address(value: Address) {
+    // ...
+}
+```
+
+## Compilation Optimization
+
+### Use soroban-sdk Macros
+
+The SDK macros generate optimized code:
+
+```rust
+use soroban_sdk::{contract, contractimpl};
+
+#[contract]
+pub struct MyContract;
+
+#[contractimpl]
+impl MyContract {
+    // Macros generate optimized entry points
+}
+```
+
+### Enable WASM Optimization Tools
+
+#### wasm-opt
+
+Use `wasm-opt` from Binaryen for additional optimization:
+
+```bash
+# Install wasm-opt
+cargo install wasm-opt
+
+# Optimize WASM file
+wasm-opt -Oz \
+  target/wasm32-unknown-unknown/release/contract.wasm \
+  -o contract_optimized.wasm
+```
+
+#### soroban-cli optimize
+
+The Soroban CLI includes optimization:
+
+```bash
+soroban contract optimize \
+  --wasm target/wasm32-unknown-unknown/release/contract.wasm
+```
+
+## Measuring Performance
+
+### Analyze WASM Size
+
+```bash
+# Check WASM file size
+ls -lh target/wasm32-unknown-unknown/release/*.wasm
+
+# Detailed size analysis
+wasm-objdump -h target/wasm32-unknown-unknown/release/contract.wasm
+```
+
+### Profile Build Time
+
+```bash
+# Time the build
+time cargo build --release --target wasm32-unknown-unknown
+
+# Verbose build with timing
+cargo build --release --target wasm32-unknown-unknown --timings
+```
+
+### Test Resource Usage
+
+Use test utilities to measure resource consumption:
+
+```rust
+#[test]
+fn test_resource_usage() {
+    let env = Env::default();
+    env.budget().reset_default();
+    
+    // Run contract function
+    client.expensive_operation();
+    
+    // Check resource usage
+    let cpu = env.budget().cpu_instruction_cost();
+    let mem = env.budget().memory_bytes_cost();
+    
+    println!("CPU instructions: {}", cpu);
+    println!("Memory bytes: {}", mem);
+}
+```
+
+## Best Practices Summary
+
+### Build Configuration
+- ✅ Use `opt-level = "z"` for release builds
+- ✅ Enable LTO (`lto = true`)
+- ✅ Set `codegen-units = 1`
+- ✅ Use `panic = "abort"`
+
+### Code Patterns
+- ✅ Minimize storage operations
+- ✅ Use fixed-size types (`BytesN`, `symbol_short!`)
+- ✅ Avoid unnecessary cloning
+- ✅ Use inline annotations strategically
+- ✅ Prefer iterators over indexed loops
+
+### Memory Management
+- ✅ Avoid large stack allocations
+- ✅ Reuse allocations when possible
+- ✅ Use appropriate data structures
+
+### Build Process
+- ✅ Minimize dependencies
+- ✅ Use feature flags
+- ✅ Run `wasm-opt` or `soroban contract optimize`
+- ✅ Measure and profile regularly
+
+## Common Anti-Patterns
+
+### ❌ Excessive Logging
+
+```rust
+// Logging in production increases size
+pub fn transfer(env: Env, from: Address, to: Address) {
+    env.logs().log("Starting transfer");
+    // ...
+    env.logs().log("Transfer complete");
+}
+```
+
+### ❌ Unused Code
+
+```rust
+// Dead code increases binary size
+pub fn unused_function() {
+    // This gets compiled but never called
+}
+```
+
+Use `#[allow(dead_code)]` carefully and remove truly unused code.
+
+### ❌ Large Match Statements
+
+```rust
+// Large match statements increase size
+match value {
+    1 => do_something_1(),
+    2 => do_something_2(),
+    // ... 100 more arms
+    100 => do_something_100(),
+    _ => default(),
+}
+
+// Consider a lookup table or different design
+```
+
+## Optimization Checklist
+
+Before deploying:
+
+- [ ] Configured optimal Cargo profile settings
+- [ ] Minimized storage operations
+- [ ] Used appropriate data types
+- [ ] Removed debug code and logs
+- [ ] Ran `cargo clippy` for suggestions
+- [ ] Optimized WASM with `wasm-opt` or Soroban CLI
+- [ ] Measured contract size and resource usage
+- [ ] Tested with realistic workloads
+- [ ] Profiled gas costs
+- [ ] Reviewed for dead code
+
+## Related
+
+- [Testing Contracts](/guides/testing)
+- [Storage](/core/storage)
+- [Deployment](/guides/deploying)

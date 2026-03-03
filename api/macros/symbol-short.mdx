@@ -1,0 +1,130 @@
+---
+title: "symbol_short!"
+description: "Creates a Symbol from a string literal at compile time"
+---
+
+Creates a `Symbol` from a string literal at compile time.
+
+The string must be 32 characters or less and contain only valid symbol characters: `a-zA-Z0-9_`.
+
+## Syntax
+
+```rust
+symbol_short!("string_literal")
+```
+
+## Parameters
+
+<ParamField path="string" type="&str" required>
+  A string literal containing 1-32 characters. Valid characters are:
+  - Lowercase letters: `a-z`
+  - Uppercase letters: `A-Z`
+  - Digits: `0-9`
+  - Underscore: `_`
+</ParamField>
+
+## Constraints
+
+- Maximum length: 32 characters
+- Valid characters: `a-zA-Z0-9_`
+- The string must be a literal (not a variable or expression)
+
+## Return Value
+
+Returns a `Symbol` value that can be used at compile time or runtime.
+
+## Example
+
+### Basic Usage
+
+```rust
+use soroban_sdk::{symbol_short, Symbol};
+
+let symbol = symbol_short!("a_str");
+assert_eq!(symbol, symbol_short!("a_str"));
+```
+
+### Using in Contract Storage
+
+```rust
+use soroban_sdk::{contract, contractimpl, symbol_short, Env};
+
+#[contract]
+pub struct Contract;
+
+#[contractimpl]
+impl Contract {
+    pub fn set_value(env: Env, value: u32) {
+        env.storage().persistent().set(&symbol_short!("VALUE"), &value);
+    }
+
+    pub fn get_value(env: Env) -> Option<u32> {
+        env.storage().persistent().get(&symbol_short!("VALUE"))
+    }
+}
+```
+
+### Using in Events
+
+```rust
+use soroban_sdk::{contract, contractimpl, symbol_short, Env};
+
+#[contractimpl]
+impl Contract {
+    pub fn emit_event(env: Env, data: u32) {
+        env.events().publish(
+            (symbol_short!("EVENT"),),
+            data
+        );
+    }
+}
+```
+
+### Maximum Length Example
+
+```rust
+use soroban_sdk::symbol_short;
+
+// Valid: exactly 32 characters
+let max_symbol = symbol_short!("abcdefghijklmnopqrstuvwxyz123456");
+
+// Invalid: 33 characters - will not compile
+// let too_long = symbol_short!("abcdefghijklmnopqrstuvwxyz1234567");
+```
+
+## Performance
+
+Symbols created with `symbol_short!` are:
+- Created at compile time (zero runtime overhead)
+- Stored efficiently as small integers internally
+- Faster to compare than strings
+- Ideal for storage keys and event topics
+
+## Comparison with Symbol::new
+
+There are two ways to create symbols:
+
+```rust
+use soroban_sdk::{symbol_short, Symbol, Env};
+
+// Compile-time creation (preferred)
+let sym1 = symbol_short!("key");
+
+// Runtime creation (more flexible, but slower)
+let env = Env::default();
+let sym2 = Symbol::new(&env, "key");
+```
+
+Use `symbol_short!` when:
+- The symbol value is known at compile time
+- You want maximum performance
+- The string is 32 characters or less
+
+Use `Symbol::new()` when:
+- The symbol value is computed at runtime
+- You need symbols longer than 32 characters
+- You need dynamic symbol creation
+
+## See Also
+
+- [`Symbol`](/api/types/symbol) - The Symbol type and runtime creation

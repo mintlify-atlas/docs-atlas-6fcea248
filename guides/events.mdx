@@ -1,0 +1,434 @@
+---
+title: "Publishing Events"
+description: "Learn how to publish and test contract events using #[contractevent]"
+---
+
+Events allow contracts to publish structured data about state changes and important actions. This data can be monitored off-chain by applications, indexers, and users.
+
+## Why Use Events?
+
+Events are essential for:
+- **Transparency**: External observers can track contract activity
+- **Monitoring**: Applications can react to state changes in real-time
+- **Debugging**: Events help diagnose issues in production
+- **Indexing**: Off-chain systems can build queryable databases from event streams
+
+## Basic Event Publishing
+
+The simplest way to publish events is using the `#[contractevent]` macro:
+
+<Steps>
+  <Step title="Define your event struct">
+    Create a struct with the `#[contractevent]` macro:
+
+    ```rust
+    use soroban_sdk::contractevent;
+
+    #[contractevent]
+    pub struct Transfer {
+        #[topic]
+        from: Address,
+        #[topic]
+        to: Address,
+        amount: i128,
+    }
+    ```
+
+    <Note>
+      Fields marked with `#[topic]` are indexed and can be efficiently filtered. Other fields are stored in the event body.
+    </Note>
+  </Step>
+
+  <Step title="Import the Event trait">
+    ```rust
+    use soroban_sdk::{contract, contractimpl, Address, Env, Event};
+    ```
+  </Step>
+
+  <Step title="Publish the event">
+    Create an instance and call `.publish()`:
+
+    ```rust
+    #[contractimpl]
+    impl Contract {
+        pub fn transfer(env: Env, from: Address, to: Address, amount: i128) {
+            // ... transfer logic ...
+
+            Transfer {
+                from: from.clone(),
+                to: to.clone(),
+                amount,
+            }
+            .publish(&env);
+        }
+    }
+    ```
+  </Step>
+</Steps>
+
+## Complete Example
+
+Here's a complete contract demonstrating event publishing:
+
+```rust
+#![no_std]
+use soroban_sdk::{
+    contract, contractevent, contractimpl, Address, Env, Event, MuxedAddress
+};
+
+#[contract]
+pub struct Contract;
+
+#[contractevent]
+pub struct Transfer {
+    #[topic]
+    from: Address,
+    #[topic]
+    to: Address,
+    amount: i128,
+    to_muxed_id: Option<u64>,
+}
+
+#[contractimpl]
+impl Contract {
+    pub fn transfer(env: Env, from: Address, to: MuxedAddress, amount: i128) {
+        // Verify authorization
+        from.require_auth();
+
+        // Perform transfer logic
+        // ...
+
+        // Publish event
+        Transfer {
+            from: from.clone(),
+            to: to.address(),
+            amount,
+            to_muxed_id: to.id(),
+        }
+        .publish(&env);
+    }
+}
+```
+
+## Event Topics
+
+Topics are indexed fields that enable efficient filtering:
+
+### When to Use Topics
+
+<Tabs>
+  <Tab title="Good for Topics">
+    - Addresses (from, to)
+    - Identifiers (token_id, order_id)
+    - Status flags (approved, executed)
+    - Small enums
+    - Fixed-size data (u64, i128, etc.)
+  </Tab>
+
+  <Tab title="Bad for Topics">
+    - Large data structures
+    - Variable-length data
+    - Vec or Map types
+    - Complex nested types
+    - Data > 32 bytes
+  </Tab>
+</Tabs>
+
+### Topic Limitations
+
+<Warning>
+  Topics cannot contain:
+  - `Vec` or `Map` types
+  - `Bytes` or `BytesN` longer than 32 bytes
+  - Custom types marked with `#[contracttype]` (they should go in the body)
+</Warning>
+
+```rust
+#[contractevent]
+pub struct OrderCreated {
+    #[topic]
+    order_id: u64,           // Good: small primitive
+    #[topic]
+    creator: Address,         // Good: address
+    items: Vec<Item>,         // Good: in body (not a topic)
+    total: i128,             // Good: in body
+}
+```
+
+## Multiple Event Types
+
+Contracts can define multiple event types:
+
+```rust
+#[contractevent]
+pub struct Mint {
+    #[topic]
+    to: Address,
+    amount: i128,
+}
+
+#[contractevent]
+pub struct Burn {
+    #[topic]
+    from: Address,
+    amount: i128,
+}
+
+#[contractevent]
+pub struct Approval {
+    #[topic]
+    owner: Address,
+    #[topic]
+    spender: Address,
+    amount: i128,
+}
+
+#[contractimpl]
+impl Token {
+    pub fn mint(env: Env, to: Address, amount: i128) {
+        Mint { to, amount }.publish(&env);
+    }
+
+    pub fn burn(env: Env, from: Address, amount: i128) {
+        from.require_auth();
+        Burn { from, amount }.publish(&env);
+    }
+
+    pub fn approve(env: Env, owner: Address, spender: Address, amount: i128) {
+        owner.require_auth();
+        Approval { owner, spender, amount }.publish(&env);
+    }
+}
+```
+
+## Events with Custom Types
+
+You can include custom types in event bodies (but not as topics):
+
+```rust
+use soroban_sdk::{contracttype, Vec};
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OrderItem {
+    pub item_id: u64,
+    pub quantity: u32,
+    pub price: i128,
+}
+
+#[contractevent]
+pub struct OrderPlaced {
+    #[topic]
+    order_id: u64,
+    #[topic]
+    buyer: Address,
+    items: Vec<OrderItem>,    // Custom type in body
+    total_price: i128,
+}
+```
+
+## Events with Optional Fields
+
+Use `Option<T>` for fields that may not always have a value:
+
+```rust
+#[contractevent]
+pub struct Transfer {
+    #[topic]
+    from: Address,
+    #[topic]
+    to: Address,
+    amount: i128,
+    memo: Option<String>,     // Optional memo field
+}
+
+#[contractimpl]
+impl Contract {
+    pub fn transfer_with_memo(
+        env: Env,
+        from: Address,
+        to: Address,
+        amount: i128,
+        memo: Option<String>,
+    ) {
+        Transfer {
+            from,
+            to,
+            amount,
+            memo,
+        }
+        .publish(&env);
+    }
+}
+```
+
+## Testing Events
+
+The testutils feature provides utilities for testing events:
+
+### Basic Event Testing
+
+```rust
+#[cfg(test)]
+mod test {
+    use super::*;
+    use soroban_sdk::{
+        testutils::{Address as _, Events},
+        Env, Event,
+    };
+
+    #[test]
+    fn test_transfer_event() {
+        let env = Env::default();
+        let contract_id = env.register(Contract, ());
+        let client = ContractClient::new(&env, &contract_id);
+
+        let from = Address::generate(&env);
+        let to = Address::generate(&env);
+        let amount = 1000i128;
+
+        client.mock_all_auths().transfer(&from, &to, &amount);
+
+        // Get all events
+        let events = env.events().all();
+        
+        // Verify event was published
+        assert_eq!(events.len(), 1);
+
+        // Verify event contents using the struct
+        assert_eq!(
+            events,
+            std::vec![Transfer {
+                from: from.clone(),
+                to: to.clone(),
+                amount,
+                memo: None,
+            }
+            .to_xdr(&env, &contract_id)],
+        );
+    }
+}
+```
+
+### Filtering Events
+
+Filter events by contract:
+
+```rust
+#[test]
+fn test_multiple_contracts() {
+    let env = Env::default();
+    let contract1_id = env.register(Contract, ());
+    let contract2_id = env.register(Contract, ());
+
+    let client1 = ContractClient::new(&env, &contract1_id);
+    let client2 = ContractClient::new(&env, &contract2_id);
+
+    // Both contracts emit events
+    client1.transfer(&addr1, &addr2, &100);
+    client2.transfer(&addr3, &addr4, &200);
+
+    // Get events from specific contract
+    let contract1_events = env.events()
+        .all()
+        .filter_by_contract(&contract1_id);
+    
+    assert_eq!(contract1_events.len(), 1);
+}
+```
+
+### Testing Failed Calls
+
+Events are only recorded for successful calls:
+
+```rust
+#[test]
+fn test_no_events_on_failure() {
+    let env = Env::default();
+    let contract_id = env.register(Contract, ());
+    let client = ContractClient::new(&env, &contract_id);
+    
+    // This call will fail
+    let _ = client.try_failing_function();
+    
+    // No events should be recorded
+    assert_eq!(env.events().all(), std::vec![]);
+}
+```
+
+## Event Naming Conventions
+
+The event name is automatically derived from the struct name:
+
+```rust
+#[contractevent]
+pub struct Transfer { }  // Event name: "transfer"
+
+#[contractevent]
+pub struct OrderPlaced { }  // Event name: "order_placed"
+
+#[contractevent]
+pub struct TokenMinted { }  // Event name: "token_minted"
+```
+
+<Tip>
+  Use descriptive, action-oriented names for events like "Transfer", "Mint", "Approval", "OrderPlaced", etc.
+</Tip>
+
+## Legacy Event Publishing
+
+Before `#[contractevent]`, events were published using the `events().publish()` method:
+
+```rust
+// Old way (deprecated)
+env.events().publish(
+    (symbol_short!("transfer"), &from, &to),  // topics
+    amount,  // data
+);
+```
+
+<Warning>
+  The legacy `events().publish()` method is deprecated. Use `#[contractevent]` for new contracts.
+</Warning>
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Keep topics focused">
+    Only add fields as topics if you need to filter by them. Topics cost more gas.
+  </Accordion>
+
+  <Accordion title="Include relevant context">
+    Events should contain all information needed to understand the action without additional queries.
+  </Accordion>
+
+  <Accordion title="Be consistent">
+    Use similar event structures across your contract for similar actions.
+  </Accordion>
+
+  <Accordion title="Test event data">
+    Always verify that events contain the correct data in your tests.
+  </Accordion>
+
+  <Accordion title="Consider event indexing">
+    Design events with off-chain indexing in mind - what queries will users need?
+  </Accordion>
+</AccordionGroup>
+
+## Event Limitations
+
+- Events are published only on successful contract execution
+- Failed or reverted transactions do not emit events
+- Events are not queryable from within contracts
+- There's no way to read past events from a contract
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Testing" icon="flask" href="/guides/testing">
+    Learn more about testing events
+  </Card>
+  <Card title="Custom Types" icon="shapes" href="/guides/custom-types">
+    Create custom types for event data
+  </Card>
+</CardGroup>
