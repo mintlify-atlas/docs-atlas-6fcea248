@@ -281,3 +281,82 @@ fn test_transfer() {
     client.transfer(&user1, &user2, &1000);
 }
 ```
+
+## MuxedAddress
+
+`MuxedAddress` is a union type that represents either a regular `Address` or a "multiplexed" address consisting of a regular address plus a `u64` ID. This allows representing virtual accounts that manage multiple off-chain balances with a single on-chain balance entry.
+
+### When to Use MuxedAddress
+
+- **Token transfers** supporting non-custodial accounts (e.g., exchange support)
+- **Off-chain balance tracking** where the ID identifies virtual sub-accounts
+- **Event emission** where the ID helps off-chain processors distinguish accounts
+
+<Warning>
+  MuxedAddress should only be used in special cases like token interfaces. Prefer using regular `Address` unless multiplexing support is necessary.
+</Warning>
+
+### Creating MuxedAddress
+
+```rust
+use soroban_sdk::{Address, MuxedAddress, Env};
+
+let env = Env::default();
+let address = Address::generate(&env);
+
+// Create a muxed address with ID 12345
+let muxed = MuxedAddress::new(&env, &address, 12345u64);
+```
+
+### Compatibility
+
+`MuxedAddress` is compatible with `Address` at the contract interface level:
+
+- Contracts accepting `MuxedAddress` can receive `Address` arguments
+- Upgrading from `Address` to `MuxedAddress` doesn't break existing clients
+- Only Stellar accounts can be multiplexed (not contract addresses)
+
+<Note>
+  MuxedAddress cannot be used as a storage key to prevent accidental key space fragmentation.
+</Note>
+
+### Example: Token Transfer
+
+```rust
+use soroban_sdk::{contract, contractimpl, Address, MuxedAddress, Env};
+
+#[contract]
+pub struct TokenContract;
+
+#[contractimpl]
+impl TokenContract {
+    // Accepts both Address and MuxedAddress
+    pub fn transfer(env: Env, from: Address, to: MuxedAddress, amount: i128) {
+        from.require_auth();
+        
+        // Extract the base address from MuxedAddress
+        let to_address = to.address();
+        
+        // Get mux ID if present (returns Option<u64>)
+        if let Some(id) = to.mux_id() {
+            // Emit event with ID for off-chain processing
+            env.events().publish(("transfer", id), (&from, &to_address, amount));
+        }
+        
+        // Perform transfer to base address
+        // ... transfer logic
+    }
+}
+```
+
+### Key Methods
+
+- `new(env: &Env, address: &Address, id: u64)` - Create multiplexed address
+- `from_address(env: &Env, address: &Address)` - Create from regular address  
+- `address(&self) -> Address` - Extract base address
+- `mux_id(&self) -> Option<u64>` - Get multiplexing ID if present
+
+## See Also
+
+- [Authentication](/core/authentication) - Using addresses for authorization
+- [Token Interface](/advanced/token-interface) - Token standard using MuxedAddress
